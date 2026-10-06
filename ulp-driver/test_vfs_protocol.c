@@ -18,7 +18,7 @@ int main(void)
     struct ulp_event ev;
     struct pollfd pfd;
 
-    printf("=== ulp-driver Plan 9 VFS Protocol Test ===\n");
+    printf("=== ulp-driver /dev/ulp protocol test ===\n");
 
     fd = open("/dev/ulp", O_RDWR | O_NONBLOCK);
     if (fd < 0) {
@@ -98,6 +98,6 @@ int main(void)
     }
 
     close(fd);
-    printf("=== Plan 9 VFS Protocol Test Completed Successfully! ===\n");
+    printf("=== /dev/ulp protocol test completed ===\n");
     return 0;
 }

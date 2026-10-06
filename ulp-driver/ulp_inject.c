@@ -13,8 +13,8 @@
 #include <stdint.h>
 #include <errno.h>
 
-/* Fast lightweight ptrace shared object & static binary injector (< 1ms runtime)
- * 100% Safe for Multi-Threaded Processes Under Heavy Load:
+/* ptrace-based injector for shared objects (dynamic binaries) and raw code (static binaries).
+ * Stops the target with ptrace while injecting.
  * - Dynamic Binaries: Non-destructive private-stack dlopen frame.
  * - Static Binaries: Injects remote sys_mmap to allocate executable page for raw code.
  * - Universal PIE & Non-PIE ELF binary parsing.
@@ -423,7 +423,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    printf("[ulp_inject] SUCCESS: Injected %s into PID %d (handle=0x%llx) in < 2ms (Soft-Realtime Safe)\n",
+    printf("[ulp_inject] SUCCESS: Injected %s into PID %d (handle=0x%llx)\n",
            path, target_pid, end_regs.rax);
     return 0;
 }

@@ -33,41 +33,41 @@
  * @patch_bytes:  Stores generated trampoline bytes
  */
 struct ulp_patch_req {
-    __u32 target_pid;
-    char  patch_name[ULP_NAME_MAX];
-    char  func_name[ULP_NAME_MAX];
-    __u64 target_vaddr;
-    __u64 patch_vaddr;
-    __u64 futex_vaddr;
-    __u32 func_len;
-    __u32 tramp_type;
-    __u8  orig_bytes[16];
-    __u8  patch_bytes[16];
+	__u32 target_pid;
+	char  patch_name[ULP_NAME_MAX];
+	char  func_name[ULP_NAME_MAX];
+	__u64 target_vaddr;
+	__u64 patch_vaddr;
+	__u64 futex_vaddr;
+	__u32 func_len;
+	__u32 tramp_type;
+	__u8  orig_bytes[16];
+	__u8  patch_bytes[16];
 };
 
 /**
  * struct ulp_patch_info - Information record for querying active patches
  */
 struct ulp_patch_info {
-    __u32 target_pid;
-    __u32 owner_uid;
-    char  comm[16];
-    char  patch_name[ULP_NAME_MAX];
-    char  func_name[ULP_NAME_MAX];
-    __u64 target_vaddr;
-    __u64 patch_vaddr;
-    __u32 tramp_len;
-    __u8  enabled;
+	__u32 target_pid;
+	__u32 owner_uid;
+	char  comm[16];
+	char  patch_name[ULP_NAME_MAX];
+	char  func_name[ULP_NAME_MAX];
+	__u64 target_vaddr;
+	__u64 patch_vaddr;
+	__u32 tramp_len;
+	__u8  enabled;
 };
 
 #define ULP_MAX_PATCH_RECORDS 64
 
 struct ulp_list_req {
-    __u32 count;
-    struct ulp_patch_info entries[ULP_MAX_PATCH_RECORDS];
+	__u32 count;
+	struct ulp_patch_info entries[ULP_MAX_PATCH_RECORDS];
 };
 
-/* 256-Bit Anti-Bitflip High-Hamming-Distance Magic Constants */
+/* 256-bit magic value for the emergency override request */
 #define ULP_OVERRIDE_MAGIC_0 0xA55AA55A69966996ULL
 #define ULP_OVERRIDE_MAGIC_1 0x5AA55AA596699669ULL
 #define ULP_OVERRIDE_MAGIC_2 0xF00FF00F0FF00FF0ULL
@@ -75,15 +75,15 @@ struct ulp_list_req {
 
 /**
  * struct ulp_override_ticket - Authenticated, Cryptographically Signed Override Token
- * Used to temporarily disable livepatching for emergency recovery without bitflip risks.
+ * Used to temporarily disable livepatching for emergency recovery .
  */
 struct ulp_override_ticket {
-    __u64 magic[4];           /* 256-bit maximum Hamming distance magic */
-    char  binary_path[128];   /* Canonical binary path (e.g. /usr/sbin/haproxy) */
-    __u64 issued_at;          /* Unix timestamp of issuance */
-    __u64 expires_at;         /* Unix timestamp of expiration (short TTL) */
-    __u64 nonce;              /* Random nonce preventing replay attacks */
-    __u8  hmac_sig[32];       /* HMAC-SHA256(secret, magic||binary||timestamps||nonce) */
+	__u64 magic[4];           /* ULP_OVERRIDE_MAGIC_0..3 */
+	char  binary_path[128];   /* Canonical binary path (e.g. /usr/sbin/haproxy) */
+	__u64 issued_at;          /* Unix timestamp of issuance */
+	__u64 expires_at;         /* Unix timestamp of expiration (short TTL) */
+	__u64 nonce;              /* Random nonce preventing replay attacks */
+	__u8  hmac_sig[32];       /* HMAC-SHA256(secret, magic||binary||timestamps||nonce) */
 };
 
 /**
@@ -93,34 +93,34 @@ struct ulp_override_ticket {
  * struct ulp_kernel_rule_req - In-Kernel Persistent Auto-Patch Rule Definition
  */
 struct ulp_kernel_rule_req {
-    char  binary_path[128];        /* e.g. /usr/local/sbin/haproxy */
-    char  patch_name[ULP_NAME_MAX];
-    char  func_name[ULP_NAME_MAX];
-    __u64 target_offset;           /* Target symbol offset in binary */
-    __u64 patch_vaddr;             /* Absolute virtual address or patch payload */
-    __u32 match_uid;               /* Specific UID or (uint32_t)-1 for any */
-    __u32 match_gid;               /* Specific GID or (uint32_t)-1 for any */
-    __u32 parent_pid;              /* Optional: Match specific parent PID hierarchy (0 = any) */
-    __u8  global_scope;            /* 1 = Apply to all processes regardless of user */
-    __u32 func_len;                /* Function length for variable trampoline (5 vs 16 bytes) */
-    __u32 tramp_type;              /* ULP_TRAMP_AUTO, ULP_TRAMP_ABS16, ULP_TRAMP_REL5 */
-    __u8  patch_bytes[16];         /* Pre-compiled trampoline or machine code */
+	char  binary_path[128];        /* e.g. /usr/local/sbin/haproxy */
+	char  patch_name[ULP_NAME_MAX];
+	char  func_name[ULP_NAME_MAX];
+	__u64 target_offset;           /* Target symbol offset in binary */
+	__u64 patch_vaddr;             /* Absolute virtual address or patch payload */
+	__u32 match_uid;               /* Specific UID or (uint32_t)-1 for any */
+	__u32 match_gid;               /* Specific GID or (uint32_t)-1 for any */
+	__u32 parent_pid;              /* Optional: Match specific parent PID hierarchy (0 = any) */
+	__u8  global_scope;            /* 1 = Apply to all processes regardless of user */
+	__u32 func_len;                /* Function length for variable trampoline (5 vs 16 bytes) */
+	__u32 tramp_type;              /* ULP_TRAMP_AUTO, ULP_TRAMP_ABS16, ULP_TRAMP_REL5 */
+	__u8  patch_bytes[16];         /* Pre-compiled trampoline or machine code */
 };
 
 #define ULP_MAX_KERNEL_RULES 32
 
 struct ulp_kernel_rules_list {
-    __u32 count;
-    struct ulp_kernel_rule_req entries[ULP_MAX_KERNEL_RULES];
+	__u32 count;
+	struct ulp_kernel_rule_req entries[ULP_MAX_KERNEL_RULES];
 };
 
 /**
- * struct ulp_override_req - Kernel-Side Anti-Bitflip Emergency Override Request
+ * struct ulp_override_req - Emergency override request
  */
 struct ulp_override_req {
-    __u64 magic[4];                /* 256-bit High-Entropy Anti-Bitflip Magic */
-    char  binary_path[128];        /* Binary to temporarily bypass */
-    __u32 ttl_seconds;             /* Auto-expiration timer */
+	__u64 magic[4];                /* ULP_OVERRIDE_MAGIC_0..3 */
+	char  binary_path[128];        /* Binary to temporarily bypass */
+	__u32 ttl_seconds;             /* Auto-expiration timer */
 };
 
 #define ULP_IOC_APPLY_PATCH     _IOWR(ULP_IOCTL_MAGIC, 1, struct ulp_patch_req)
@@ -133,71 +133,71 @@ struct ulp_override_req {
 #define ULP_IOC_CLEAR_OVERRIDE  _IO(ULP_IOCTL_MAGIC,   8)
 
 /* =========================================================================
- * Plan 9 VFS Command & Real-Time Telemetry Interface (/dev/ulp)
+ * Command and telemetry interface (/dev/ulp read/write)
  * Supports read(), write() via copy_struct_from_user(), and poll() / epoll
  * ========================================================================= */
 
 enum ulp_vfs_cmd_type {
-    ULP_CMD_ARM            = 1, /* Arm maintenance mode (CAP_SYS_ADMIN + TTL) */
-    ULP_CMD_DISARM         = 2, /* Lock driver into fail-closed enforce mode */
-    ULP_CMD_APPLY_PATCH    = 3, /* Apply livepatch (requires active ARM session) */
-    ULP_CMD_REVERT_PATCH   = 4, /* Revert livepatch */
-    ULP_CMD_ADD_RULE       = 5, /* Register in-kernel persistent rule */
-    ULP_CMD_DEL_RULE       = 6, /* Delete in-kernel persistent rule */
-    ULP_CMD_QUERY_STATUS   = 7, /* Query driver state and active nonce */
+	ULP_CMD_ARM            = 1, /* Arm maintenance mode (CAP_SYS_ADMIN + TTL) */
+	ULP_CMD_DISARM         = 2, /* Lock driver into fail-closed enforce mode */
+	ULP_CMD_APPLY_PATCH    = 3, /* Apply livepatch (requires active ARM session) */
+	ULP_CMD_REVERT_PATCH   = 4, /* Revert livepatch */
+	ULP_CMD_ADD_RULE       = 5, /* Register in-kernel persistent rule */
+	ULP_CMD_DEL_RULE       = 6, /* Delete in-kernel persistent rule */
+	ULP_CMD_QUERY_STATUS   = 7, /* Query driver state and active nonce */
 };
 
 enum ulp_driver_state {
-    ULP_STATE_LOCKED       = 0, /* Fail-Closed: Auto-patches existing rules, zero new pokes */
-    ULP_STATE_ARMED        = 1, /* Maintenance: Active admin session with TTL timer */
+	ULP_STATE_LOCKED       = 0, /* Fail-Closed: Auto-patches existing rules, zero new pokes */
+	ULP_STATE_ARMED        = 1, /* Maintenance: Active admin session with TTL timer */
 };
 
 enum ulp_event_type {
-    ULP_EVT_EXEC_AUTO_PATCH = 1, /* Execve matched rule and applied livepatch */
-    ULP_EVT_FORK_INHERIT    = 2, /* Fork inherited active livepatch */
-    ULP_EVT_MANUAL_APPLY    = 3, /* Manual patch applied via /dev/ulp write() */
-    ULP_EVT_MANUAL_REVERT   = 4, /* Patch reverted */
-    ULP_EVT_ARMED           = 5, /* Driver transitioned to ARMED */
-    ULP_EVT_DISARMED        = 6, /* Driver transitioned to LOCKED (or TTL expired) */
-    ULP_EVT_SECURITY_ALERT  = 7, /* Security boundary / bitflip alert */
-    ULP_EVT_OVERFLOW        = 8, /* Telemetry event queue overflow (gap detected) */
-    ULP_EVT_RESUME          = 9, /* Driver re-adopted livepatch across module reload/resumption */
+	ULP_EVT_EXEC_AUTO_PATCH = 1, /* Execve matched rule and applied livepatch */
+	ULP_EVT_FORK_INHERIT    = 2, /* Fork inherited active livepatch */
+	ULP_EVT_MANUAL_APPLY    = 3, /* Manual patch applied via /dev/ulp write() */
+	ULP_EVT_MANUAL_REVERT   = 4, /* Patch reverted */
+	ULP_EVT_ARMED           = 5, /* Driver transitioned to ARMED */
+	ULP_EVT_DISARMED        = 6, /* Driver transitioned to LOCKED (or TTL expired) */
+	ULP_EVT_SECURITY_ALERT  = 7, /* Security boundary violation */
+	ULP_EVT_OVERFLOW        = 8, /* Telemetry event queue overflow (gap detected) */
+	ULP_EVT_RESUME          = 9, /* Driver re-adopted livepatch across module reload/resumption */
 };
 
 /**
  * struct ulp_event - Real-time kernel telemetry event record streamed via read()
  */
 struct ulp_event {
-    __u64 timestamp_ns;
-    __u32 event_type;      /* enum ulp_event_type */
-    __u32 pid;
-    __u32 uid;
-    __u64 vaddr;
-    char  comm[16];
-    char  patch_name[32];
-    char  msg[64];
+	__u64 timestamp_ns;
+	__u32 event_type;      /* enum ulp_event_type */
+	__u32 pid;
+	__u32 uid;
+	__u64 vaddr;
+	char  comm[16];
+	char  patch_name[32];
+	char  msg[64];
 };
 
 /**
  * struct ulp_cmd_v1 - Version-Tolerant VFS Command Structure (copy_struct_from_user)
  */
 struct ulp_cmd_v1 {
-    __u32 size;             /* sizeof(struct ulp_cmd_v1) - always first field */
-    __u32 cmd_type;         /* enum ulp_vfs_cmd_type */
-    __u32 arm_nonce;        /* Nonce validation matching active armed session */
-    __u32 ttl_seconds;      /* For ULP_CMD_ARM: TTL in seconds (default 60, max 300) */
-    __u64 target_pid;       /* Target process PID */
-    __u64 target_vaddr;     /* Function target virtual address */
-    __u64 patch_vaddr;      /* Replacement function virtual address */
-    __u32 tramp_len;        /* 5 (rel32) or 16 (CET abs jump) */
-    __u8  patch_bytes[16];  /* Inlined micro-patch machine code */
-    __u8  sha256[32];       /* SHA256 of verified patch payload */
-    char  patch_name[ULP_NAME_MAX];
-    char  func_name[ULP_NAME_MAX];
-    char  binary_path[128];
-    __u64 target_offset;
-    __u32 match_uid;
-    __u32 global_scope;
+	__u32 size;             /* sizeof(struct ulp_cmd_v1) - always first field */
+	__u32 cmd_type;         /* enum ulp_vfs_cmd_type */
+	__u32 arm_nonce;        /* Nonce validation matching active armed session */
+	__u32 ttl_seconds;      /* For ULP_CMD_ARM: TTL in seconds (default 60, max 300) */
+	__u64 target_pid;       /* Target process PID */
+	__u64 target_vaddr;     /* Function target virtual address */
+	__u64 patch_vaddr;      /* Replacement function virtual address */
+	__u32 tramp_len;        /* 5 (rel32) or 16 (CET abs jump) */
+	__u8  patch_bytes[16];  /* Inlined micro-patch machine code */
+	__u8  sha256[32];       /* SHA256 of verified patch payload */
+	char  patch_name[ULP_NAME_MAX];
+	char  func_name[ULP_NAME_MAX];
+	char  binary_path[128];
+	__u64 target_offset;
+	__u32 match_uid;
+	__u32 global_scope;
 };
 
 #endif /* _ULP_UAPI_H */
