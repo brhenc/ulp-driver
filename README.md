@@ -1,15 +1,29 @@
 # ulp-driver
 
-**ulp-driver** is an experimental research project for **Zero-Downtime Userspace Livepatching (ULP)** on Linux, backed by a kernel driver, alongside **Kernel Livepatching (KLP)** experiments. It patches functions inside running processes (C, Rust, Go) without restarts, dropped sockets, or lost in-memory state, across x86_64, arm64, riscv64, s390x, ppc64le and loongarch64.
+**ulp-driver** is a personal research project exploring **userspace livepatching (ULP)** on Linux: replacing functions inside running processes (C, Rust, Go) without restarting them. It consists of an x86_64 kernel driver, a ptrace-based injector, and a set of experiments against real daemons (HAProxy, PostgreSQL, MariaDB). There are also some kernel livepatching (KLP) samples.
+
+The project was prototyped with AI to test whether the approach is feasible before investing serious time in it. If the results justify it, a full refactor into a proper long-term project will follow. Until then, the docs describe MVPs and overstate what the code does. See [Status & limitations](#status--limitations) for the current state.
 
 ---
 
-## Architecture Overview
+## What's here
 
-1. **ULP kernel driver** (`ulp-driver/`): a kernel module plus userspace tooling (`ulp_ctl`, `ulp_inject`, `libulp_preload`) that injects signed patch payloads into live processes, installs function trampolines, and supports shadow variables, exec-rule persistence, and driver resumption / state handoff across module reloads.
-2. **Linux Kernel 7.x Livepatching**: scheduler-assisted transition convergence (`linux/livepatch_sched.h`), architecture-aware syscall wrappers (`KLP_SYSCALL_DEFINEx`), and static call trampolines (`KLP_STATIC_CALL`).
-3. **Patch signing & policy**: patch payloads are verified against a `policy.json` trust policy (Sigstore/cosign, GPG, and hybrid post-quantum ML-DSA-65 signatures) before injection.
-4. **Continuous & canary livepatching**: multi-generation patch stacks on a single process, statistical canary rollout (e.g. 1% of requests), and crash-resilient fallback.
+1. **ULP kernel driver** (`ulp-driver/`): a kernel module (x86_64) plus userspace tools (`ulp_ctl`, `ulp_inject`, `libulp_preload`). It writes function-entry trampolines into a target process, tracks applied patches, carries patches across `fork`/`exec`, and can hand its state over across module reloads.
+2. **Injector** (`ulp_inject`): attaches with ptrace and loads a patch payload into the target, via `dlopen` for dynamic binaries or a remote `mmap` for static ones.
+3. **Experiments**: multi-generation patching of one process, canary-style rollout (patching a fraction of requests), and trampoline encodings for other architectures tested under QEMU user-mode emulation.
+4. **Signature tooling** (optional): `ulp_crypto_verifier.py` checks patch payloads against a `policy.json` trust policy (cosign / GPG). It is a standalone pre-flight check and is not enforced by the driver or the injector.
+5. **KLP samples** (`kernel-livepatch/`): small kernel livepatch modules.
+
+---
+
+## Status & limitations
+
+- **Patch application is best-effort, not atomic.** The driver writes trampolines with `access_process_vm()` without stopping the target's threads. The quiescence check (no thread executing in the patched range) inspects saved register state and is racy for threads running at the time. A thread can occasionally execute a partially written trampoline.
+- **Signatures are not enforced** on the injection path (see above).
+- **The post-quantum signing (`ulp_pqc_signer.py`) is a toy.** It is a Dilithium-style learning implementation, not FIPS 204 ML-DSA. It does not interoperate with real ML-DSA libraries and must not be used for anything security-relevant.
+- **`ulp_scope=1`** (same-UID access) does not apply ptrace access checks (Yama, LSM hooks, non-dumpable processes). Use the default root-only scope.
+- The driver is **x86_64 only**. The other-architecture work is limited to emulation tests.
+- Benchmarks and test results were run on a small number of personal test VMs.
 
 ---
 
@@ -19,19 +33,19 @@
 .
 ├── ulp-driver/            # Kernel driver, userspace tools, fuzzing harnesses
 ├── kernel-livepatch/      # Kernel livepatch modules (KLP samples, ULP-aware livepatch)
-├── examples/              # Runnable end-to-end examples (C, Rust, zero-downtime resumption)
+├── examples/              # Runnable end-to-end examples (C, Rust, driver reload)
 ├── docs/                  # Operator guide, hacking guides (docs/hacking/), design notes, writeups
-├── signed-patches/        # Sample patch payloads with detached signatures
+├── signed-patches/        # Sample patch payloads with detached signatures (test keys)
 ├── ulp-keys/              # Public verification keys used by policy.json
 ├── *-livepatch-bench/     # Livepatch benchmarks against HAProxy, PostgreSQL, MariaDB, Go, Rust
-├── *-canary-bench/        # Canary livepatching and fault-resilience suites
-├── cross-arch-bench/      # Multi-architecture trampoline emulation suite
+├── *-canary-bench/        # Canary-rollout and fault-handling experiments
+├── cross-arch-bench/      # Trampoline encodings for other architectures (QEMU user-mode)
 ├── rust-livepatch-plugin/ # LLVM plugin for livepatchable Rust codegen
 ├── telemetry/             # Prometheus exporter
 └── vm-provisioning/       # Test VM provisioning script
 ```
 
-See [`examples/README.md`](examples/README.md) for a guided walkthrough, [`docs/hacking/`](docs/hacking/README.md) for in-depth internals, and [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md) for operating the driver.
+See [`examples/README.md`](examples/README.md) for a guided walkthrough, [`docs/hacking/`](docs/hacking/README.md) for internals notes, and [`docs/OPERATOR_GUIDE.md`](docs/OPERATOR_GUIDE.md) for operating the driver.
 
 ---
 
@@ -61,9 +75,9 @@ rmmod livepatch_uname
 
 ## Signing Keys
 
-Only **public** keys are committed. Private signing keys are never stored in this repository; generate your own with `cosign generate-key-pair`, `gpg --gen-key`, or `ulp_pqc_signer.py` (ML-DSA-65) and point `policy.json` at the corresponding public keys.
+Only **public** test keys are committed. Private signing keys are never stored in this repository; generate your own with `cosign generate-key-pair` or `gpg --gen-key` and point `policy.json` at the corresponding public keys.
 
-> **Warning:** This is experimental research code that loads a kernel module and modifies running processes. Use only on disposable test machines.
+> **Warning:** This code loads a kernel module and modifies running processes. Use it only on disposable test machines.
 
 ---
 
