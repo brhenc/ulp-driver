@@ -7,6 +7,10 @@
 #include <stdint.h>
 #include <errno.h>
 #include <signal.h>
+#include <elf.h>
+#include <limits.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include "ulp_uapi.h"
 
 static void print_usage(const char *prog)
@@ -14,6 +18,8 @@ static void print_usage(const char *prog)
     fprintf(stderr, "Usage: %s [--arm[=TTL]] <command> [args]\n\n", prog);
     fprintf(stderr, "Commands:\n");
     fprintf(stderr, "  list\n");
+    fprintf(stderr, "  apply <pid> <binary>:<symbol> <patch.so>:<symbol> [patch_name]\n");
+    fprintf(stderr, "                 resolve both symbols (patch.so must already be injected with ulp_inject)\n");
     fprintf(stderr, "  apply <pid> <patch_name> <func_name> <target_hex_vaddr> <patch_hex_vaddr> [func_len] [futex_hex_vaddr]\n");
     fprintf(stderr, "  revert <pid> <target_hex_vaddr>\n");
     fprintf(stderr, "  add-rule <bin_path> <patch_name> <func_name> <target_offset_hex> <patch_vaddr_hex> [func_len] [match_uid] [global_scope]\n");
@@ -41,6 +47,133 @@ static int send_arm_cmd(int fd, uint32_t cmd_type, uint32_t ttl)
         perror(cmd_type == ULP_CMD_ARM ? "Failed to arm /dev/ulp" : "Failed to disarm /dev/ulp");
         return -1;
     }
+    return 0;
+}
+
+struct sym_loc {
+    uint64_t vaddr;     /* runtime address in the target process */
+    uint64_t size;      /* st_size from the symbol table */
+};
+
+/* Look up a defined function symbol in an ELF64 file: .symtab first, then .dynsym. */
+static int elf_find_func(const char *path, const char *name, uint64_t *value, uint64_t *size,
+                         int *is_pie, uint64_t *min_vaddr)
+{
+    struct stat st;
+    int fd, ret = -1;
+    uint8_t *map;
+
+    fd = open(path, O_RDONLY);
+    if (fd < 0 || fstat(fd, &st) < 0) {
+        perror(path);
+        if (fd >= 0)
+            close(fd);
+        return -1;
+    }
+    map = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (map == MAP_FAILED) {
+        perror("mmap");
+        return -1;
+    }
+
+    Elf64_Ehdr *eh = (Elf64_Ehdr *)map;
+    if ((size_t)st.st_size < sizeof(*eh) || memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0 ||
+        eh->e_ident[EI_CLASS] != ELFCLASS64 || eh->e_machine != EM_X86_64 ||
+        eh->e_shoff + (uint64_t)eh->e_shnum * sizeof(Elf64_Shdr) > (uint64_t)st.st_size) {
+        fprintf(stderr, "%s: not a valid x86_64 ELF64 file\n", path);
+        goto out;
+    }
+    *is_pie = (eh->e_type == ET_DYN);
+
+    Elf64_Phdr *ph = (Elf64_Phdr *)(map + eh->e_phoff);
+    *min_vaddr = UINT64_MAX;
+    for (int i = 0; i < eh->e_phnum; i++)
+        if (ph[i].p_type == PT_LOAD && ph[i].p_vaddr < *min_vaddr)
+            *min_vaddr = ph[i].p_vaddr;
+    *min_vaddr &= ~(uint64_t)(sysconf(_SC_PAGESIZE) - 1);
+
+    Elf64_Shdr *sh = (Elf64_Shdr *)(map + eh->e_shoff);
+    uint32_t want[2] = { SHT_SYMTAB, SHT_DYNSYM };
+    for (int pass = 0; pass < 2 && ret < 0; pass++) {
+        for (int i = 0; i < eh->e_shnum && ret < 0; i++) {
+            if (sh[i].sh_type != want[pass] || sh[i].sh_link >= eh->e_shnum)
+                continue;
+            Elf64_Sym *syms = (Elf64_Sym *)(map + sh[i].sh_offset);
+            const char *strtab = (const char *)(map + sh[sh[i].sh_link].sh_offset);
+            uint64_t n = sh[i].sh_size / sizeof(Elf64_Sym);
+            for (uint64_t j = 0; j < n; j++) {
+                if (ELF64_ST_TYPE(syms[j].st_info) != STT_FUNC || syms[j].st_shndx == SHN_UNDEF)
+                    continue;
+                if (syms[j].st_name >= sh[sh[i].sh_link].sh_size)
+                    continue;
+                if (strcmp(strtab + syms[j].st_name, name) == 0) {
+                    *value = syms[j].st_value;
+                    *size = syms[j].st_size;
+                    ret = 0;
+                    break;
+                }
+            }
+        }
+    }
+    if (ret < 0)
+        fprintf(stderr, "%s: function symbol '%s' not found\n", path, name);
+out:
+    munmap(map, st.st_size);
+    return ret;
+}
+
+/* Resolve "<file>:<symbol>" to a runtime address in process pid. */
+static int resolve_spec(pid_t pid, const char *spec, char *sym_out, size_t sym_len, struct sym_loc *loc)
+{
+    char file[PATH_MAX], real[PATH_MAX], maps_path[64], line[PATH_MAX + 128];
+    const char *colon = strrchr(spec, ':');
+    uint64_t value, size, min_vaddr, start = 0;
+    int is_pie, found = 0;
+    FILE *f;
+
+    if (!colon || colon == spec || !colon[1] || (size_t)(colon - spec) >= sizeof(file)) {
+        fprintf(stderr, "Expected <file>:<symbol>, got '%s'\n", spec);
+        return -1;
+    }
+    memcpy(file, spec, colon - spec);
+    file[colon - spec] = '\0';
+    snprintf(sym_out, sym_len, "%s", colon + 1);
+    if (!realpath(file, real)) {
+        perror(file);
+        return -1;
+    }
+    if (elf_find_func(real, colon + 1, &value, &size, &is_pie, &min_vaddr) < 0)
+        return -1;
+
+    snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", pid);
+    f = fopen(maps_path, "r");
+    if (!f) {
+        perror(maps_path);
+        return -1;
+    }
+    while (fgets(line, sizeof(line), f)) {
+        unsigned long lo, hi, off;
+        char path[PATH_MAX];
+
+        path[0] = '\0';
+        if (sscanf(line, "%lx-%lx %*s %lx %*s %*s %4095[^\n]", &lo, &hi, &off, path) < 3)
+            continue;
+        if (off == 0 && strcmp(path, real) == 0) {
+            start = lo;
+            found = 1;
+            break;
+        }
+    }
+    fclose(f);
+    if (!found) {
+        fprintf(stderr, "%s is not mapped in PID %d%s\n", real, pid,
+                is_pie ? " (inject the patch library first with ulp_inject)" : "");
+        return -1;
+    }
+
+    loc->vaddr = is_pie ? (start - min_vaddr) + value : value;
+    loc->size = size;
     return 0;
 }
 
@@ -114,6 +247,46 @@ int main(int argc, char **argv)
                        p->enabled ? "ACTIVE (1)" : "DISABLED (0)");
             }
         }
+    } else if (strcmp(action, "apply") == 0 && (argc == 5 || argc == 6) &&
+               strchr(argv[3], ':') && strchr(argv[4], ':')) {
+        struct ulp_patch_req req;
+        struct sym_loc target, patch;
+        char tsym[ULP_NAME_MAX], psym[ULP_NAME_MAX];
+
+        memset(&req, 0, sizeof(req));
+        req.target_pid = (pid_t)atoi(argv[2]);
+        if (resolve_spec(req.target_pid, argv[3], tsym, sizeof(tsym), &target) < 0 ||
+            resolve_spec(req.target_pid, argv[4], psym, sizeof(psym), &patch) < 0) {
+            close(fd);
+            return 1;
+        }
+        if (target.size < 5) {
+            fprintf(stderr, "Refusing: '%s' has %s size (%llu bytes); at least 5 bytes are needed for a jump\n",
+                    tsym, target.size ? "too small a" : "an unknown", (unsigned long long)target.size);
+            close(fd);
+            return 1;
+        }
+        snprintf(req.patch_name, ULP_NAME_MAX, "%s", argc == 6 ? argv[5] : psym);
+        snprintf(req.func_name, ULP_NAME_MAX, "%s", tsym);
+        req.target_vaddr = target.vaddr;
+        req.patch_vaddr = patch.vaddr;
+        req.func_len = (uint32_t)target.size;
+        printf("[ulp_ctl] Resolved %s = 0x%llx (%u bytes), %s = 0x%llx\n", tsym,
+               (unsigned long long)req.target_vaddr, req.func_len, psym, (unsigned long long)req.patch_vaddr);
+
+        if (ioctl(fd, ULP_IOC_APPLY_PATCH, &req) < 0) {
+            int err = errno;
+            perror("ioctl(ULP_IOC_APPLY_PATCH) failed");
+            if (err == EPERM && !arm)
+                fprintf(stderr, "Hint: the driver may be locked. Rerun as root with --arm, or load the driver with dev_mode=1 for testing (see dmesg).\n");
+            if (err == ERANGE)
+                fprintf(stderr, "Hint: '%s' is under 16 bytes, so only a 5-byte relative jump fits, and the patch is more than +/-2 GB away. This function cannot be patched safely yet.\n", tsym);
+            close(fd);
+            return 1;
+        }
+        printf("[ulp_ctl] SUCCESS: Kernel applied livepatch '%s::%s' to PID %d at 0x%llx -> 0x%llx (len=%u)\n",
+               req.patch_name, req.func_name, req.target_pid,
+               (unsigned long long)req.target_vaddr, (unsigned long long)req.patch_vaddr, req.func_len);
     } else if (strcmp(action, "apply") == 0) {
         if (argc < 7) {
             print_usage(argv[0]);

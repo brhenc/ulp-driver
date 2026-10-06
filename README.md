@@ -80,6 +80,16 @@ sudo examples/01_basic_c_service/run_example.sh
 
 It starts a small service, injects a patch payload, redirects one function to it, and reverts it. [`examples/README.md`](examples/README.md) describes all the examples.
 
+### Applying a patch by symbol
+
+```bash
+sudo ulp-driver/ulp_inject <pid> ./patch.so                         # load the patch library into the process
+sudo ulp-driver/ulp_ctl apply <pid> /path/to/binary:func ./patch.so:new_func
+sudo ulp-driver/ulp_ctl revert <pid> <target_hex_vaddr>             # address is printed by apply and ulp_ctl list
+```
+
+`ulp_ctl` resolves both symbols from the ELF symbol tables and `/proc/<pid>/maps` (PIE and non-PIE) and uses the function's real size. It refuses functions whose size is unknown or under 5 bytes. Functions under 16 bytes need the patch within ±2 GB, which is usually not the case for an injected library, so the driver rejects those.
+
 ### `dev_mode` and the maintenance window
 
 By default the driver refuses to apply patches unless root has **armed a maintenance window**. `dev_mode=1` skips that check (and allows unloading the module and lowering `kernel.ulp_scope`), which is convenient for testing. Without `dev_mode`:
