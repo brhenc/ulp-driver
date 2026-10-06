@@ -11,17 +11,22 @@ Tests:
 7. Linux Kernel Livepatching (CONFIG_LIVEPATCH / ftrace): In-flight hot-patching of ulp_driver.ko.
 """
 
+import os as _os
+import sys as _sys
+REPO_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if REPO_DIR not in _sys.path:
+    _sys.path.insert(0, REPO_DIR)
 import os
 import sys
 import time
 import subprocess
 
-BENCH_DIR = "/root/ulp-driver/rust-livepatch-bench"
+BENCH_DIR = REPO_DIR + "/rust-livepatch-bench"
 PATCH_SO = f"{BENCH_DIR}/patch_pgrust/target/release/libpatch_pgrust.so"
 DAEMON_BIN = f"{BENCH_DIR}/target/debug/pgrust_daemon"
 CLIENT_BIN = f"{BENCH_DIR}/target/debug/pgrust_client"
-DRIVER_DIR = "/root/ulp-driver/ulp-driver"
-KLP_DIR = "/root/ulp-driver/kernel-livepatch"
+DRIVER_DIR = REPO_DIR + "/ulp-driver"
+KLP_DIR = REPO_DIR + "/kernel-livepatch"
 ULP_CTL = "/usr/local/bin/ulp_ctl"
 
 def run_cmd(cmd, env=None):

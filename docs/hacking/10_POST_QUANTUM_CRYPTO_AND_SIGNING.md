@@ -113,7 +113,7 @@ $$\text{Valid}(\text{Payload}) \iff \text{Valid}_{\text{Classical}}(\text{Payloa
 ### 5.1 Tool Overview
 * [`ulp_pqc_signer.py`](/ulp_pqc_signer.py): Generates ML-DSA-65 keypairs and outputs pure PQC and Hybrid envelopes.
 * [`ulp_crypto_verifier.py`](/ulp_crypto_verifier.py): Policy verification engine supporting `pqcSigned`, `hybridSigned`, `sigstoreSigned`, and `signedBy`.
-* [`test_pqc_verification_suite.py`](/test_pqc_verification_suite.py): 6-phase test suite validating tamper resistance and fail-closed security.
+* [`tests/test_pqc_verification_suite.py`](/tests/test_pqc_verification_suite.py): 6-phase test suite validating tamper resistance and fail-closed security.
 
 ### 5.2 Generating Keys & Signing Livepatches
 

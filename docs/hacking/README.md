@@ -26,7 +26,7 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 
 ```bash
 # 1. Multi-Daemon Continuous Evolution Suite (pgrust, MariaDB, Postgres, HAProxy)
-python3 test_multi_version_continuous_suite.py
+python3 tests/test_multi_version_continuous_suite.py
 
 # 2. MariaDB Zero-Downtime Socket Backlog Expansion (ss -tlpn Send-Q 80 -> 300)
 python3 mariadb-livepatch-bench/test_socket_backlog_live_expansion.py
@@ -41,7 +41,7 @@ python3 cross-arch-bench/run_cross_arch_emulation_suite.py
 python3 test_canary_resilience_suite.py
 
 # 6. Post-Quantum & Hybrid Signature Verification Suite
-python3 test_pqc_verification_suite.py
+python3 tests/test_pqc_verification_suite.py
 
 # 7. Operator Terminal UI Dashboard
 python3 ulp_tui.py

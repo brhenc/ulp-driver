@@ -17,6 +17,11 @@ Executes sequential transitions:
     -> Revert (Atomic rollback back to V0)
 """
 
+import os as _os
+import sys as _sys
+REPO_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if REPO_DIR not in _sys.path:
+    _sys.path.insert(0, REPO_DIR)
 import os
 import sys
 import time
@@ -25,7 +30,7 @@ import socket
 import subprocess
 import threading
 
-BASE_DIR = "/root/ulp-driver"
+BASE_DIR = REPO_DIR
 DRIVER_DIR = f"{BASE_DIR}/ulp-driver"
 ULP_CTL = "/usr/local/bin/ulp_ctl"
 ULP_INJECT = "/usr/local/bin/ulp_inject"

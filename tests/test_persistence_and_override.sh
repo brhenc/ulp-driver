@@ -9,6 +9,7 @@
 # ==============================================================================
 set -euo pipefail
 
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -19,7 +20,7 @@ echo -e "${BLUE}================================================================
 echo -e "${BLUE}   PERSISTENT LIVEPATCHING & ANTI-TAMPER OVERRIDE BENCHMARK SUITE    ${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 
-DRIVER_DIR="/root/ulp-driver/ulp-driver"
+DRIVER_DIR="$REPO_DIR/ulp-driver"
 HAPROXY_DIR="/root/haproxy-livepatch"
 
 # 0. Build and Install ULP Subsystem

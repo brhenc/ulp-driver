@@ -10,17 +10,22 @@ Tests:
 - Clean Revert: Rollback of all patches across all daemons post-cycles.
 """
 
+import os as _os
+import sys as _sys
+REPO_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if REPO_DIR not in _sys.path:
+    _sys.path.insert(0, REPO_DIR)
 import os
 import sys
 import time
 import subprocess
 import threading
 
-BENCH_DIR = "/root/ulp-driver/rust-livepatch-bench"
+BENCH_DIR = REPO_DIR + "/rust-livepatch-bench"
 PATCH_SO = f"{BENCH_DIR}/patch_pgrust/target/release/libpatch_pgrust.so"
 DAEMON_BIN = f"{BENCH_DIR}/target/debug/pgrust_daemon"
 CLIENT_BIN = f"{BENCH_DIR}/target/debug/pgrust_client"
-DRIVER_DIR = "/root/ulp-driver/ulp-driver"
+DRIVER_DIR = REPO_DIR + "/ulp-driver"
 ULP_CTL = "/usr/local/bin/ulp_ctl"
 ULP_INJECT = "/usr/local/bin/ulp_inject"
 

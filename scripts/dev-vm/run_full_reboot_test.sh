@@ -13,7 +13,7 @@ echo -e "${BLUE}================================================================
 
 # 1. Sync driver and setup script to debian-13
 echo -e "${YELLOW}>>> Step 1: Syncing ULP driver and configuring persistence on debian-13...${NC}"
-scp -r "$(dirname "$(readlink -f "$0")")"/ulp-driver debian-13:/root/ulp-driver/
+scp -r "$(dirname "$(readlink -f "$0")")"/../../ulp-driver debian-13:/root/ulp-driver/
 scp "$(dirname "$(readlink -f "$0")")"/test_reboot_persistence.sh debian-13:/root/
 
 # 2. Run Pre-Reboot Setup and State Recording

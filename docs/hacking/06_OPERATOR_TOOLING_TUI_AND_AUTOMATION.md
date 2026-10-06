@@ -1,7 +1,7 @@
 # Operator Tooling, TUI Dashboard & Continuous Automation
 
 **Module:** Operator Tools & Interfaces  
-**Paths:** `ulp_tui.py`, `ulp_crypto_verifier.py`, `test_multi_version_continuous_suite.py`  
+**Paths:** `ulp_tui.py`, `ulp_crypto_verifier.py`, `tests/test_multi_version_continuous_suite.py`  
 **Path:** `docs/hacking/06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md`  
 
 ---
@@ -80,12 +80,12 @@ python3 ulp_crypto_verifier.py verify \
 
 ---
 
-## 3. Continuous Verification Harness (`test_multi_version_continuous_suite.py`)
+## 3. Continuous Verification Harness (`tests/test_multi_version_continuous_suite.py`)
 
 The automated regression suite tests the complete $V_0 \to V_1 \to V_2 \to V_3 \to \text{Resumption} \to V_0$ lifecycle across all running daemons simultaneously under active traffic load:
 
 ```bash
-python3 test_multi_version_continuous_suite.py
+python3 tests/test_multi_version_continuous_suite.py
 ```
 
 ### 5 Validation Stages Executed:

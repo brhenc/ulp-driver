@@ -3,6 +3,7 @@
 # Tests HAProxy reload handover, concurrent ioctl storms, syzkaller fuzzing, and tri-service traffic.
 set -euo pipefail
 
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 echo "======================================================================"
 echo "    ULP-DRIVER: CONTINUOUS STRESS & FUZZING TEST SUITE        "
 echo "======================================================================"
@@ -61,7 +62,7 @@ python3 /root/test_tri_traffic.py
 # PHASE 3: Concurrent Multi-Threaded IOCTL Storm
 # -----------------------------------------------------------------------------
 echo -e "\n>>> [PHASE 3] Running Multi-Threaded Concurrent IOCTL Fuzzer..."
-cd /root/ulp-driver/ulp-driver
+cd $REPO_DIR/ulp-driver
 ./test_concurrent_ioctls || true
 echo "[+] test_concurrent_ioctls completed without kernel panic"
 

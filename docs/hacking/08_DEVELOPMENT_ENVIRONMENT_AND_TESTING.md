@@ -55,19 +55,19 @@ chmod 755 /usr/local/bin/ulp_ctl /usr/local/bin/ulp_inject
 ### 3.1 Multi-Daemon Continuous Evolution Suite
 Runs the 5-stage continuous multi-version livepatching lifecycle across `pgrust`, `mariadbd`, `postgres`, and `haproxy`:
 ```bash
-python3 /root/ulp-driver/test_multi_version_continuous_suite.py
+python3 tests/test_multi_version_continuous_suite.py
 ```
 
 ### 3.2 MariaDB Socket Backlog & maxconn Expansion Benchmark
 Validates zero-downtime socket backlog expansion (`ss -tlpn` `Send-Q` $80 \to 300$) and `max_connections` expansion ($151 \to 50,000$):
 ```bash
-python3 /root/ulp-driver/mariadb-livepatch-bench/test_socket_backlog_live_expansion.py
+python3 mariadb-livepatch-bench/test_socket_backlog_live_expansion.py
 ```
 
 ### 3.3 Golang Multi-Version Continuous Suite
 Validates continuous livepatching on Go daemons under sustained concurrent HTTP traffic:
 ```bash
-python3 /root/ulp-driver/go-livepatch-bench/test_go_continuous_livepatch.py
+python3 go-livepatch-bench/test_go_continuous_livepatch.py
 ```
 
 ### 3.4 Cross-Architecture 6-ISA Emulation Suite
@@ -79,7 +79,7 @@ python3 cross-arch-bench/run_cross_arch_emulation_suite.py
 ### 3.5 TUI Dashboard Backend Validation
 Validates Plan 9 VFS communication, target scanning, arming/disarming, and generation switching:
 ```bash
-python3 /root/ulp-driver/test_ulp_tui_backend.py
+python3 tests/test_ulp_tui_backend.py
 ```
 
 ---

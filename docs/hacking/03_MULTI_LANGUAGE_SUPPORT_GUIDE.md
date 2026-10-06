@@ -48,7 +48,7 @@ Never add non-static data members to an existing C++ class at runtime (which cha
 * **Internal Rust Functions**: Internal `"Rust"` ABI functions pass arguments in LLVM-optimized registers. ULP trampolines strictly use the platform scratch register (`%r11` on x86, `X16` on ARM64), preserving all caller-saved registers.
 
 ### 4.2 Multi-Generation Livepatching Pattern ($V_0 \to V_1 \to V_2 \to V_3$)
-As demonstrated in [`test_multi_version_continuous_suite.py`](/test_multi_version_continuous_suite.py):
+As demonstrated in [`tests/test_multi_version_continuous_suite.py`](/tests/test_multi_version_continuous_suite.py):
 * **$V_1$ Generation**: Implements CVE security validation.
 * **$V_2$ Generation**: Attaches dynamic shadow telemetry state (`ulp_shadow_alloc`).
 * **$V_3$ Generation**: Activates SIMD / AVX2 query execution paths.

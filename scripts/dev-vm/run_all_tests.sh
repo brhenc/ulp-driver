@@ -14,7 +14,7 @@ echo -e "${BLUE}================================================================
 echo -e "${BLUE}        ULP-DRIVER: UNIFIED REGRESSION TEST BATTERY          ${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"  # repo root
 
 sync_and_test() {
     local target="$1"

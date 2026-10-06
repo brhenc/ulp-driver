@@ -9,18 +9,23 @@ Tests:
 - Atomic Revert [R]
 """
 
+import os as _os
+import sys as _sys
+REPO_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if REPO_DIR not in _sys.path:
+    _sys.path.insert(0, REPO_DIR)
 import sys
 import os
 import subprocess
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO_DIR)
 import ulp_tui
 
 # Ensure pgrust daemon is running in background for testing
 subprocess.run("pkill -9 -f pgrust_daemon 2>/dev/null || true", shell=True)
 time.sleep(0.5)
-pgrust_bin = "/root/ulp-driver/rust-livepatch-bench/target/release/pgrust_daemon"
+pgrust_bin = REPO_DIR + "/rust-livepatch-bench/target/release/pgrust_daemon"
 pgrust_env = os.environ.copy()
 pgrust_env["PGRUST_PORT"] = "5435"
 pgrust_env["LD_PRELOAD"] = "/tmp/ulp_patches/libpatch_pgrust_v1.so:/tmp/ulp_patches/libpatch_pgrust_v2.so:/tmp/ulp_patches/libpatch_pgrust_v3.so"

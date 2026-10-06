@@ -100,7 +100,7 @@ ulp-driver/
 ├── cross-arch-bench/                      # 6-Architecture QEMU Emulation Verification Suite
 │   └── run_cross_arch_emulation_suite.py  # Automated compiler & emulator runner
 ├── ulp_tui.py / ulp-tui.py                # Full-featured Curses Operator Terminal UI
-├── test_multi_version_continuous_suite.py # End-to-end continuous validation suite
+├── tests/test_multi_version_continuous_suite.py # End-to-end continuous validation suite
 └── ulp_crypto_verifier.py                 # Cosign & GPG cryptographic verification tool
 ```
 

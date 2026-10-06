@@ -42,6 +42,8 @@ The project was prototyped with AI to test whether the approach is feasible befo
 ├── *-canary-bench/        # Canary-rollout and fault-handling experiments
 ├── cross-arch-bench/      # Trampoline encodings for other architectures (QEMU user-mode)
 ├── rust-livepatch-plugin/ # LLVM plugin for livepatchable Rust codegen
+├── tests/                 # Integration test suites (run as root on a test VM)
+├── scripts/dev-vm/        # Author's VM orchestration scripts (ssh/scp to named test VMs)
 ├── telemetry/             # Prometheus exporter
 └── vm-provisioning/       # Test VM provisioning script
 ```

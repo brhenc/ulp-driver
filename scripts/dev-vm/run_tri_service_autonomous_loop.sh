@@ -8,7 +8,7 @@ echo "======================================================================"
 
 # 1. Sync driver source to debian-13
 echo ">>> Step 1: Syncing codebase to debian-13..."
-scp -r "$(dirname "$(readlink -f "$0")")"/ulp-driver debian-13:/root/ulp-driver/
+scp -r "$(dirname "$(readlink -f "$0")")"/../../ulp-driver debian-13:/root/ulp-driver/
 scp "$(dirname "$(readlink -f "$0")")"/test_tri_service_reboot.sh debian-13:/root/test_tri_service_reboot.sh
 
 # 2. Build and install on debian-13

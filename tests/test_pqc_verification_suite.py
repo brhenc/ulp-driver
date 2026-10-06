@@ -11,6 +11,11 @@ Tests:
   7. Policy enforcement across HAProxy, MariaDB, and PostgreSQL targets
 """
 
+import os as _os
+import sys as _sys
+REPO_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if REPO_DIR not in _sys.path:
+    _sys.path.insert(0, REPO_DIR)
 import os
 import sys
 import json
