@@ -45,10 +45,13 @@ assert_failure() {
 echo -e "${BLUE}=== [1/7] Setting up Test Environment, Users, and Dummy Daemons ===${NC}"
 
 # Recompile driver & tools
-cd /root/ulp-driver/ulp-driver
+cd "$(dirname "$(readlink -f "$0")")"
 make clean && make
 rmmod ulp_driver 2>/dev/null || true
-insmod ulp_driver.ko 2>/dev/null || true
+# dev_mode=1 bypasses the maintenance-window arming gate so suites 0-2 can test scope checks in isolation
+insmod ulp_driver.ko dev_mode=1 2>/dev/null || true
+# /dev/ulp is created 0600; scope 1 needs unprivileged users to reach the ioctl
+chmod 666 /dev/ulp
 
 # Install ulp_ctl and ulp_inject globally
 install -m 755 ulp_ctl /usr/local/bin/ulp_ctl
@@ -72,6 +75,7 @@ cat << 'EOF' > "$TEST_DIR/dummy_target.c"
 #include <stdlib.h>
 #include <stdint.h>
 #include <signal.h>
+#include <sys/prctl.h>
 
 volatile uint32_t g_test_futex = 0; // 0 = unlocked, 1 = locked
 
@@ -88,6 +92,8 @@ void sig_handler(int sig) {
 int main(int argc, char **argv) {
     signal(SIGUSR1, sig_handler);
     signal(SIGUSR2, sig_handler);
+    if (argc > 1)
+        prctl(PR_SET_DUMPABLE, 0); /* like a setuid binary or a daemon that dropped privileges */
     while(1) {
         usleep(100000);
     }
@@ -105,7 +111,7 @@ int livepatch_get_metric(void) {
 }
 EOF
 
-gcc -O0 -no-pie -fno-omit-frame-pointer "$TEST_DIR/dummy_target.c" -o "$TEST_DIR/dummy_bin"
+gcc -O0 -no-pie -fno-omit-frame-pointer -falign-functions=16 "$TEST_DIR/dummy_target.c" -o "$TEST_DIR/dummy_bin"
 gcc -shared -fPIC -O0 "$TEST_DIR/patch_metric.c" -o "$TEST_DIR/patch_metric.so"
 chmod 777 "$TEST_DIR/dummy_bin" "$TEST_DIR/patch_metric.so"
 
@@ -114,10 +120,12 @@ killall dummy_bin 2>/dev/null || true
 # Launch dummy processes for root, alice, and bob
 su - alice -c "$TEST_DIR/dummy_bin &"
 su - bob -c "$TEST_DIR/dummy_bin &"
+su - alice -c "$TEST_DIR/dummy_bin nodump &"
 $TEST_DIR/dummy_bin &
 sleep 1
 
-ALICE_PID=$(pgrep -u alice dummy_bin | head -n 1)
+ALICE_PID=$(pgrep -u alice -f "dummy_bin$" | head -n 1)
+ALICE_NODUMP_PID=$(pgrep -u alice -f "dummy_bin nodump" | head -n 1)
 BOB_PID=$(pgrep -u bob dummy_bin | head -n 1)
 ROOT_PID=$(pgrep -u root dummy_bin | head -n 1)
 
@@ -137,6 +145,7 @@ inject_payload() {
 inject_payload "$ALICE_PID"
 inject_payload "$BOB_PID"
 inject_payload "$ROOT_PID"
+inject_payload "$ALICE_NODUMP_PID"
 
 get_patch_addr() {
     local pid="$1"
@@ -148,6 +157,7 @@ get_patch_addr() {
 ALICE_PATCH_ADDR=$(get_patch_addr "$ALICE_PID")
 BOB_PATCH_ADDR=$(get_patch_addr "$BOB_PID")
 ROOT_PATCH_ADDR=$(get_patch_addr "$ROOT_PID")
+ALICE_NODUMP_PATCH_ADDR=$(get_patch_addr "$ALICE_NODUMP_PID")
 
 # ==============================================================================
 # [Suite 1]: Mode 0 (ULP_SCOPE_DISABLED) & Emergency Rollback
@@ -175,6 +185,9 @@ assert_failure "Mode 1: Alice CANNOT livepatch Bob's process (Cross-user blocked
 
 assert_failure "Mode 1: Alice CANNOT livepatch Root's process (Privilege escalation blocked)" \
     su - alice -c "$ULP_CTL apply $ROOT_PID test_attack get_metric $TARGET_ADDR $ROOT_PATCH_ADDR $FUNC_LEN"
+
+assert_failure "Mode 1: Alice CANNOT livepatch her own non-dumpable process" \
+    su - alice -c "$ULP_CTL apply $ALICE_NODUMP_PID test_attack get_metric $TARGET_ADDR $ALICE_NODUMP_PATCH_ADDR $FUNC_LEN"
 
 assert_success "Mode 1: Root CAN livepatch Root process" \
     $ULP_CTL apply "$ROOT_PID" "root_patch" "get_metric" "$TARGET_ADDR" "$ROOT_PATCH_ADDR" "$FUNC_LEN"
@@ -254,9 +267,11 @@ $ULP_CTL revert "$ROOT_PID" "$TARGET_ADDR" 2>/dev/null || true
 # [Suite 4]: Mode 3 (ULP_SCOPE_LOCKED - Immutable Ratchet & Module Pinning)
 # ==============================================================================
 echo -e "\n${BLUE}=== [7/7] Test Suite: Mode 3 (ULP_SCOPE_LOCKED - Immutable Ratchet & rmmod block) ===${NC}"
+# Production semantics from here on: no dev_mode, so the ratchet and module pinning apply
+echo N > /sys/module/ulp_driver/parameters/dev_mode
 sysctl -w kernel.ulp_scope=3 >/dev/null
 
-assert_success "Mode 3: Root CAN livepatch while locked" \
+assert_failure "Mode 3: Root CANNOT livepatch without an armed maintenance window" \
     $ULP_CTL apply "$ROOT_PID" "locked_patch" "get_metric" "$TARGET_ADDR" "$ROOT_PATCH_ADDR" "$FUNC_LEN"
 
 assert_failure "Mode 3: Alice CANNOT livepatch while locked" \
