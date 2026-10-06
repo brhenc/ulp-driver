@@ -12,6 +12,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include "ulp_uapi.h"
+#include "ulp_buildid.h"
 
 static void print_usage(const char *prog)
 {
@@ -25,6 +26,7 @@ static void print_usage(const char *prog)
     fprintf(stderr, "  add-rule <bin_path> <patch_name> <func_name> <target_offset_hex> <patch_vaddr_hex> [func_len] [match_uid] [global_scope]\n");
     fprintf(stderr, "  del-rule <bin_path> <target_offset_hex>\n");
     fprintf(stderr, "  list-rules\n");
+    fprintf(stderr, "  build-id <binary>   print the GNU build-id that add-rule records for a binary\n");
     fprintf(stderr, "  set-override <bin_path> [ttl_seconds]\n");
     fprintf(stderr, "  clear-override\n");
     fprintf(stderr, "  arm [TTL]      open a maintenance window and hold it until TTL expires or Ctrl-C\n");
@@ -206,6 +208,26 @@ int main(int argc, char **argv)
     }
 
     const char *action = argv[1];
+
+    if (strcmp(action, "build-id") == 0) {
+        uint8_t id[ULP_BUILD_ID_MAX];
+        char hex[2 * ULP_BUILD_ID_MAX + 1];
+        int len;
+
+        if (argc < 3) {
+            print_usage(argv[0]);
+            return 1;
+        }
+        len = ulp_read_build_id(argv[2], id, sizeof(id));
+        if (len <= 0) {
+            fprintf(stderr, "%s: %s\n", argv[2], len == 0 ? "no GNU build-id note" : "not a readable ELF64 file");
+            return 1;
+        }
+        ulp_build_id_to_hex(id, len, hex);
+        printf("%s\n", hex);
+        return 0;
+    }
+
     int fd = open("/dev/ulp", O_RDWR);
     if (fd < 0) {
         perror("Failed to open /dev/ulp");
@@ -356,6 +378,18 @@ int main(int argc, char **argv)
         rreq.match_uid = (argc > 8) ? (uint32_t)atoi(argv[8]) : (uint32_t)-1;
         rreq.global_scope = (argc > 9) ? (uint8_t)atoi(argv[9]) : 1;
 
+        /* Record the binary's build-id so the driver skips this rule if the binary is replaced */
+        int idlen = ulp_read_build_id(rreq.binary_path, rreq.build_id, sizeof(rreq.build_id));
+        if (idlen < 0) {
+            fprintf(stderr, "Cannot read %s as an ELF64 file\n", rreq.binary_path);
+            close(fd);
+            return 1;
+        }
+        if (idlen == 0)
+            fprintf(stderr, "Warning: %s has no GNU build-id; the rule will also apply if the binary is replaced\n",
+                    rreq.binary_path);
+        rreq.build_id_len = (uint8_t)idlen;
+
         /* Build safe return stub or 16-byte CET absolute trampoline / 5-byte relative jump */
         if (rreq.patch_vaddr == 0) {
             rreq.tramp_type = ULP_TRAMP_ABS16;
@@ -411,18 +445,21 @@ int main(int argc, char **argv)
         }
 
         printf("\n=== ACTIVE IN-KERNEL PERSISTENT LIVEPATCH RULES ===\n");
-        printf("%-30s %-20s %-20s %-18s %-18s %-6s %-6s\n",
-               "BINARY PATH", "PATCH_NAME", "FUNCTION", "TARGET_OFFSET", "PATCH_VADDR", "UID", "GLOBAL");
+        printf("%-30s %-20s %-20s %-18s %-18s %-6s %-6s %s\n",
+               "BINARY PATH", "PATCH_NAME", "FUNCTION", "TARGET_OFFSET", "PATCH_VADDR", "UID", "GLOBAL", "BUILD_ID");
         printf("--------------------------------------------------------------------------------------------------------------------\n");
         if (rlist.count == 0) {
             printf("No persistent kernel rules registered.\n");
         } else {
             for (uint32_t i = 0; i < rlist.count; i++) {
                 struct ulp_kernel_rule_req *r = &rlist.entries[i];
-                printf("%-30s %-20s %-20s 0x%016llx 0x%016llx %-6u %-6u\n",
+                char hex[2 * ULP_BUILD_ID_MAX + 1];
+
+                ulp_build_id_to_hex(r->build_id, r->build_id_len, hex);
+                printf("%-30s %-20s %-20s 0x%016llx 0x%016llx %-6u %-6u %s\n",
                        r->binary_path, r->patch_name, r->func_name,
                        (unsigned long long)r->target_offset, (unsigned long long)r->patch_vaddr,
-                       r->match_uid, r->global_scope);
+                       r->match_uid, r->global_scope, r->build_id_len ? hex : "(none)");
             }
         }
         printf("--------------------------------------------------------------------------------------------------------------------\n\n");

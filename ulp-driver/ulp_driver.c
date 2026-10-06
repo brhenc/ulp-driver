@@ -29,6 +29,8 @@
 #include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/version.h>
+#include <linux/elf.h>
+#include <linux/file.h>
 #include <linux/sched/coredump.h>
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
 #include <linux/sched/exec_state.h>
@@ -212,7 +214,7 @@ static atomic_t g_active_rules = ATOMIC_INIT(0);
  * Driver Resumption & State Handoff Architecture
  * ========================================================================= */
 #define ULP_STATE_MAGIC 0x554C505354415445ULL /* "ULPSTATE" */
-#define ULP_STATE_VERSION 1
+#define ULP_STATE_VERSION 2 /* v2: rules carry a build-id */
 #define ULP_DEFAULT_STATE_FILE "/run/ulp/state.bin"
 #define ULP_FALLBACK_STATE_FILE "/run/ulp_state.bin"
 
@@ -963,6 +965,12 @@ static long ulp_add_rule(struct ulp_kernel_rule_req *req)
 	req->patch_name[sizeof(req->patch_name) - 1] = '\0';
 	req->func_name[sizeof(req->func_name) - 1] = '\0';
 
+	if (req->build_id_len > ULP_BUILD_ID_MAX)
+		return -EINVAL;
+	if (!req->build_id_len)
+		pr_warn("[ulp_driver] rule for %s has no build-id: it will also be applied if the binary is replaced\n",
+			req->binary_path);
+
 	rule = kzalloc(sizeof(*rule), GFP_KERNEL);
 	if (!rule)
 		return -ENOMEM;
@@ -1163,6 +1171,72 @@ struct ulp_exec_work {
 	struct ulp_kernel_rule_req rule;
 };
 
+#ifndef NT_GNU_BUILD_ID
+#define NT_GNU_BUILD_ID 3
+#endif
+
+/*
+ * Read the GNU build-id note of an ELF64 file. build_id_parse_file() is not
+ * exported to modules, so walk the PT_NOTE segments with kernel_read().
+ * Returns the build-id length, 0 if the file has none, or a negative errno.
+ */
+static int ulp_read_build_id(struct file *file, u8 *id)
+{
+	Elf64_Ehdr eh;
+	Elf64_Phdr ph;
+	loff_t pos = 0;
+	u8 *buf;
+	int i, ret = 0;
+
+	if (kernel_read(file, &eh, sizeof(eh), &pos) != sizeof(eh))
+		return -EIO;
+	if (memcmp(eh.e_ident, ELFMAG, SELFMAG) || eh.e_ident[EI_CLASS] != ELFCLASS64 ||
+	    eh.e_phentsize != sizeof(ph) || eh.e_phnum > 128)
+		return -ENOEXEC;
+
+	buf = kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	for (i = 0; i < eh.e_phnum && ret == 0; i++) {
+		size_t off = 0, len;
+		ssize_t n;
+
+		pos = eh.e_phoff + (u64)i * sizeof(ph);
+		if (kernel_read(file, &ph, sizeof(ph), &pos) != sizeof(ph)) {
+			ret = -EIO;
+			break;
+		}
+		if (ph.p_type != PT_NOTE)
+			continue;
+		len = min_t(u64, ph.p_filesz, PAGE_SIZE);
+		pos = ph.p_offset;
+		n = kernel_read(file, buf, len, &pos);
+		if (n <= 0)
+			continue;
+
+		while (off + sizeof(Elf64_Nhdr) <= (size_t)n) {
+			Elf64_Nhdr *nh = (Elf64_Nhdr *)(buf + off);
+			size_t name_off = off + sizeof(*nh);
+			size_t desc_off = name_off + ALIGN(nh->n_namesz, 4);
+			size_t next = desc_off + ALIGN(nh->n_descsz, 4);
+
+			if (next > (size_t)n || next <= off)
+				break;
+			if (nh->n_type == NT_GNU_BUILD_ID && nh->n_namesz == 4 &&
+			    !memcmp(buf + name_off, "GNU", 4) &&
+			    nh->n_descsz > 0 && nh->n_descsz <= ULP_BUILD_ID_MAX) {
+				memcpy(id, buf + desc_off, nh->n_descsz);
+				ret = nh->n_descsz;
+				break;
+			}
+			off = next;
+		}
+	}
+	kfree(buf);
+	return ret;
+}
+
 /* Executes in normal, sleepable, preemptible process context just before return to userspace */
 static void ulp_exec_task_work_fn(struct callback_head *cb)
 {
@@ -1171,6 +1245,7 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	struct mm_struct *mm = task->mm;
 	struct vm_area_struct *vma;
 	struct ulp_patch_entry *p_entry = NULL;
+	struct file *exe_file = NULL;
 	u64 target_vaddr = 0;
 	int ret;
 	unsigned long flags;
@@ -1195,15 +1270,41 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 			} else {
 				target_vaddr = vma->vm_start + ework->rule.target_offset; /* PIE relative */
 			}
+			exe_file = get_file(vma->vm_file);
 			break;
 		}
 	}
 	mmap_read_unlock(mm);
 
 	if (!target_vaddr) {
+		if (exe_file)
+			fput(exe_file);
 		kfree(ework);
 		return;
 	}
+
+	/*
+	 * Skip rules made for a different build of this binary (e.g. after a
+	 * package update): writing the trampoline at a stale offset would
+	 * corrupt unrelated code and crash the process on every start.
+	 */
+	if (ework->rule.build_id_len) {
+		u8 id[ULP_BUILD_ID_MAX];
+		int len = ulp_read_build_id(exe_file, id);
+
+		if (len != ework->rule.build_id_len ||
+		    memcmp(id, ework->rule.build_id, ework->rule.build_id_len)) {
+			pr_warn_ratelimited("[ulp_driver] skipping stale rule '%s' for %s in PID %d: build-id mismatch\n",
+					    ework->rule.patch_name, ework->rule.binary_path, task->pid);
+			ulp_push_event(ULP_EVT_SECURITY_ALERT, task->pid,
+				       from_kuid(&init_user_ns, task_uid(task)), target_vaddr,
+				       task->comm, ework->rule.patch_name, "Rule skipped: build-id mismatch");
+			fput(exe_file);
+			kfree(ework);
+			return;
+		}
+	}
+	fput(exe_file);
 
 	/* Pin the module while patches are active, unless resumption mode is enabled */
 	if (!ulp_pin_module_ref()) {

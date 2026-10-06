@@ -11,6 +11,7 @@
 #include <openssl/sha.h>
 #include <openssl/rand.h>
 #include "ulp_uapi.h"
+#include "ulp_buildid.h"
 
 #define ULP_CONFIG_DIR "/etc/ulp"
 #define ULP_RULES_CONF "/etc/ulp/persistent_rules.conf"
@@ -96,16 +97,34 @@ static int load_rules(void)
 
         char target_off_str[64] = "0";
         char patch_vaddr_str[64] = "0";
+        char build_id_str[64] = "";
         rreq.func_len = 16;
         /* Support both colon-delimited and whitespace-delimited configs */
         for (char *c = line; *c; c++) {
             if (*c == ':') *c = ' ';
         }
 
-        int parsed = sscanf(line, "%127s %63s %63s %63s %63s %u %u %hhu",
+        int parsed = sscanf(line, "%127s %63s %63s %63s %63s %u %u %hhu %63s",
                             rreq.binary_path, rreq.patch_name, rreq.func_name,
                             target_off_str, patch_vaddr_str,
-                            &rreq.func_len, &rreq.match_uid, &rreq.global_scope);
+                            &rreq.func_len, &rreq.match_uid, &rreq.global_scope, build_id_str);
+
+        /*
+         * Optional 9th field "build_id=<hex>" (from `ulp_ctl build-id <binary>`), recorded when
+         * the rule was written. It is deliberately not computed here: at boot the binary may
+         * already have been replaced, and the rule must then be skipped, not re-targeted.
+         */
+        if (parsed >= 9) {
+            int idlen = -1;
+
+            if (strncmp(build_id_str, "build_id=", 9) == 0)
+                idlen = ulp_build_id_from_hex(build_id_str + 9, rreq.build_id, sizeof(rreq.build_id));
+            if (idlen < 0) {
+                fprintf(stderr, "[-] Invalid build_id field for %s: %s\n", rreq.binary_path, build_id_str);
+                continue;
+            }
+            rreq.build_id_len = (uint8_t)idlen;
+        }
 
         if (parsed >= 3) {
             rreq.target_offset = strtoull(target_off_str, NULL, 16);

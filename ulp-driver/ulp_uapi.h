@@ -105,7 +105,11 @@ struct ulp_kernel_rule_req {
 	__u32 func_len;                /* Function length for variable trampoline (5 vs 16 bytes) */
 	__u32 tramp_type;              /* ULP_TRAMP_AUTO, ULP_TRAMP_ABS16, ULP_TRAMP_REL5 */
 	__u8  patch_bytes[16];         /* Pre-compiled trampoline or machine code */
+	__u8  build_id_len;            /* 0 = no check (legacy rule) */
+	__u8  build_id[20];            /* GNU build-id the rule was made for; rule is skipped on mismatch */
 };
+
+#define ULP_BUILD_ID_MAX 20
 
 #define ULP_MAX_KERNEL_RULES 32
 
