@@ -26,6 +26,11 @@
 #include <linux/sched/task.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
+#include <linux/version.h>
+#include <linux/sched/coredump.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+#include <linux/sched/exec_state.h>
+#endif
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/mmap_lock.h>
@@ -40,7 +45,6 @@
 #include <linux/sysctl.h>
 #include <linux/ptrace.h>
 #include <linux/string.h>
-#include <linux/version.h>
 #include <linux/kprobes.h>
 #include <linux/dcache.h>
 #include <linux/highmem.h>
@@ -335,6 +339,24 @@ static struct task_struct *ulp_get_task_by_pid(pid_t nr)
     return task;
 }
 
+/* True if the target may be ptraced by a same-credential user (dumpable == "owner") */
+static bool ulp_task_dumpable_by_owner(struct task_struct *task, struct mm_struct *mm)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 2, 0)
+    /* 7.2+: dumpability lives in task->exec_state; the accessor is not exported */
+    struct task_exec_state *es;
+    bool ret;
+
+    rcu_read_lock();
+    es = rcu_dereference(task->exec_state);
+    ret = es && READ_ONCE(es->dumpable) == TASK_DUMPABLE_OWNER;
+    rcu_read_unlock();
+    return ret;
+#else
+    return get_dumpable(mm) == SUID_DUMP_USER;
+#endif
+}
+
 /* Enforce sysctl scope, capability, and DAC user boundaries */
 static bool ulp_check_access(struct task_struct *task, struct mm_struct *mm, bool is_revert)
 {
@@ -360,6 +382,17 @@ static bool ulp_check_access(struct task_struct *task, struct mm_struct *mm, boo
     /* Mode 1 (ULP_SCOPE_USER_SAME_UID): Root OR matching UID/EUID/SUID for unprivileged users */
     if (capable(CAP_SYS_ADMIN))
         return true;
+
+    /*
+     * Writing to another process's text is equivalent to ptrace attach.
+     * ptrace_may_access() is not exported to modules, so mirror its core
+     * checks here: refuse non-dumpable targets (setuid binaries, processes
+     * that dropped privileges or called prctl(PR_SET_DUMPABLE, 0)), then
+     * require fully matching credentials. Yama and LSM ptrace hooks are not
+     * reachable from a module and are NOT applied.
+     */
+    if (!ulp_task_dumpable_by_owner(task, mm))
+        return false;
 
     rcu_read_lock();
     tcred = __task_cred(task);

@@ -21,7 +21,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 - **Patch application is best-effort, not atomic.** The driver writes trampolines with `access_process_vm()` without stopping the target's threads. The quiescence check (no thread executing in the patched range) inspects saved register state and is racy for threads running at the time. A thread can occasionally execute a partially written trampoline.
 - **Signatures are not enforced** on the injection path (see above).
 - **The post-quantum signing (`ulp_pqc_signer.py`) is a toy.** It is a Dilithium-style learning implementation, not FIPS 204 ML-DSA. It does not interoperate with real ML-DSA libraries and must not be used for anything security-relevant.
-- **`ulp_scope=1`** (same-UID access) does not apply ptrace access checks (Yama, LSM hooks, non-dumpable processes). Use the default root-only scope.
+- **`ulp_scope=1`** (same-UID access) checks matching credentials and refuses non-dumpable targets, but cannot apply Yama or LSM ptrace hooks (they are not exported to modules). Use the default root-only scope.
 - The driver is **x86_64 only**. The other-architecture work is limited to emulation tests.
 - Benchmarks and test results were run on a small number of personal test VMs.
 

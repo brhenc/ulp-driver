@@ -415,13 +415,11 @@ def sign_patch_hybrid(payload_path: str, pqc_key_file: str, classical_key_file: 
         env["COSIGN_PASSWORD"] = ""
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
         
-        classical_b64 = ""
-        if res.returncode == 0 and os.path.exists(tmp_cosign_sig):
-            with open(tmp_cosign_sig, "r") as f:
-                classical_b64 = f.read().strip()
-            os.remove(tmp_cosign_sig)
-        else:
-            classical_b64 = base64.b64encode(hashlib.sha256(payload_bytes + b"cosign-layer").digest()).decode()
+        if res.returncode != 0 or not os.path.exists(tmp_cosign_sig):
+            raise RuntimeError(f"cosign sign-blob failed (exit {res.returncode}): {res.stderr.strip()}")
+        with open(tmp_cosign_sig, "r") as f:
+            classical_b64 = f.read().strip()
+        os.remove(tmp_cosign_sig)
 
     hybrid_envelope = {
         "version": "1.0",
