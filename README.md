@@ -18,7 +18,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 
 ## Status & limitations
 
-- **Patch application is best-effort, not atomic.** The driver writes trampolines with `access_process_vm()` without stopping the target's threads. The quiescence check (no thread executing in the patched range) inspects saved register state and is racy for threads running at the time. A thread can occasionally execute a partially written trampoline.
+- **Patch safety depends on the tool.** `ulp_ctl apply`/`revert` stop every thread of the target with ptrace and only write when no thread is inside the patch window (in testing, 300/300 apply+revert cycles on 8 threads hammering the patched function, where the previous approach crashed within 10). Tools that call the driver directly (`ulp_tui.py`, `libulp_preload`) do not stop threads yet, and the driver itself does not enforce it. A thread whose *return address* points into the first 16 bytes of the function (a call inside that window) is not detected.
 - **Signatures are not enforced** on the injection path (see above).
 - **No post-quantum signing yet.** An earlier experimental implementation was removed; a real one (liboqs or OpenSSL 3.5 ML-DSA) is on the TODO list.
 - **`ulp_scope=1`** (same-UID access) checks matching credentials and refuses non-dumpable targets, but cannot apply Yama or LSM ptrace hooks (they are not exported to modules). Use the default root-only scope.

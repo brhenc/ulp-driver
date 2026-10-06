@@ -10,7 +10,8 @@
  *   1. Tracking state is allocated before process memory is modified, so an
  *      allocation failure never leaves an untracked patch behind.
  *   2. Trampolines are written in 8-byte chunks (see ulp_atomic_direct_poke()
- *      for the ordering). This is best-effort, not atomic; see TODO.md.
+ *      for the ordering). The stores are not atomic as a whole: callers must
+ *      stop the target's threads first (ulp_ctl does, via ptrace); see TODO.md.
  *   3. Records for exited processes are reaped to avoid PID-reuse confusion.
  *   4. List and thread traversals have explicit iteration bounds.
  *   5. VMA checks run under mmap_read_lock, released before access_process_vm().

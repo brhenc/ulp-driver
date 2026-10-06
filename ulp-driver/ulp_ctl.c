@@ -11,6 +11,10 @@
 #include <limits.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/ptrace.h>
+#include <sys/wait.h>
+#include <sys/user.h>
+#include <dirent.h>
 #include "ulp_uapi.h"
 #include "ulp_buildid.h"
 
@@ -140,7 +144,7 @@ static int resolve_spec(pid_t pid, const char *spec, char *sym_out, size_t sym_l
 {
     char file[PATH_MAX], real[PATH_MAX], maps_path[64], line[PATH_MAX + 128];
     const char *colon = strrchr(spec, ':');
-    uint64_t value, size, min_vaddr, start = 0;
+    uint64_t value, size, min_vaddr, next_func, start = 0;
     int is_pie, found = 0;
     FILE *f;
 
@@ -155,8 +159,11 @@ static int resolve_spec(pid_t pid, const char *spec, char *sym_out, size_t sym_l
         perror(file);
         return -1;
     }
-    if (elf_find_func(real, colon + 1, &value, &size, &is_pie, &min_vaddr, NULL) < 0)
+    if (elf_find_func(real, colon + 1, &value, &size, &is_pie, &min_vaddr, &next_func) < 0)
         return -1;
+    /* Alignment padding up to the next function is usable for the trampoline */
+    if (next_func != UINT64_MAX && next_func - value > size)
+        size = next_func - value;
 
     snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", pid);
     f = fopen(maps_path, "r");
@@ -212,6 +219,135 @@ static int elf_exec_seg_base(const char *path, uint64_t *base)
     }
     close(fd);
     return ret;
+}
+
+/*
+ * Patching safety: the driver writes the trampoline with ordinary stores, so no
+ * thread of the target may execute the patch window while it is written. Stop
+ * every thread with PTRACE_SEIZE + PTRACE_INTERRUPT (unlike SIGSTOP this is
+ * invisible to the target's parent), check their instruction pointers, and only
+ * then ask the driver to write. A stopped thread's registers are exact, so the
+ * driver's own quiescence check is accurate too.
+ */
+#define ULP_MAX_THREADS 4096
+
+struct stopped_threads {
+    pid_t tids[ULP_MAX_THREADS];
+    int n;
+};
+
+static void resume_threads(struct stopped_threads *st)
+{
+    for (int i = 0; i < st->n; i++)
+        ptrace(PTRACE_DETACH, st->tids[i], NULL, NULL);
+    st->n = 0;
+}
+
+static int thread_is_stopped(const struct stopped_threads *st, pid_t tid)
+{
+    for (int i = 0; i < st->n; i++)
+        if (st->tids[i] == tid)
+            return 1;
+    return 0;
+}
+
+/* Stop all threads of pid; re-scan until no new threads appear. Returns 0, or -1 with errno set. */
+static int stop_threads(pid_t pid, struct stopped_threads *st)
+{
+    char path[64];
+    int added;
+
+    st->n = 0;
+    snprintf(path, sizeof(path), "/proc/%d/task", pid);
+    do {
+        DIR *d = opendir(path);
+        struct dirent *de;
+
+        if (!d)
+            return -1;
+        added = 0;
+        while ((de = readdir(d))) {
+            pid_t tid = (pid_t)atoi(de->d_name);
+            int status;
+
+            if (tid <= 0 || thread_is_stopped(st, tid))
+                continue;
+            if (st->n == ULP_MAX_THREADS) {
+                closedir(d);
+                errno = E2BIG;
+                return -1;
+            }
+            if (ptrace(PTRACE_SEIZE, tid, NULL, NULL) < 0) {
+                if (errno == ESRCH)
+                    continue; /* thread exited meanwhile */
+                closedir(d);
+                return -1;
+            }
+            if (ptrace(PTRACE_INTERRUPT, tid, NULL, NULL) < 0 ||
+                waitpid(tid, &status, __WALL) < 0 || !WIFSTOPPED(status))
+                continue; /* exited while being stopped */
+            st->tids[st->n++] = tid;
+            added = 1;
+        }
+        closedir(d);
+    } while (added);
+    return 0;
+}
+
+/* Returns 1 if a stopped thread's instruction pointer is inside [lo, hi). */
+static int thread_in_window(const struct stopped_threads *st, uint64_t lo, uint64_t hi,
+                            pid_t *who, uint64_t *ip)
+{
+    for (int i = 0; i < st->n; i++) {
+        struct user_regs_struct regs;
+
+        if (ptrace(PTRACE_GETREGS, st->tids[i], NULL, &regs) == 0 &&
+            regs.rip >= lo && regs.rip < hi) {
+            *who = st->tids[i];
+            *ip = regs.rip;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * Issue an apply/revert ioctl with every thread of pid stopped and none inside
+ * the patch window [lo, hi). Retries while a thread is inside it. Returns the
+ * ioctl result (errno preserved), or -2 after printing an error if the threads
+ * could not be stopped.
+ */
+static int ioctl_with_threads_stopped(int fd, unsigned long code, void *arg, pid_t pid,
+                                      uint64_t lo, uint64_t hi)
+{
+    static struct stopped_threads st;
+    pid_t who = 0;
+    uint64_t ip = 0;
+
+    for (int attempt = 0; attempt < 200; attempt++) {
+        if (stop_threads(pid, &st) < 0) {
+            int err = errno;
+
+            resume_threads(&st);
+            fprintf(stderr, "Cannot stop the threads of PID %d with ptrace: %s%s\n", pid, strerror(err),
+                    err == EPERM ? " (run as root, or check kernel.yama.ptrace_scope; is a debugger attached?)" : "");
+            return -2;
+        }
+        if (!thread_in_window(&st, lo, hi, &who, &ip)) {
+            int ret = ioctl(fd, code, arg);
+            int err = errno;
+
+            resume_threads(&st);
+            errno = err;
+            return ret;
+        }
+        resume_threads(&st);
+        usleep(1000 + attempt * 100);
+    }
+    fprintf(stderr, "Thread %d of PID %d kept executing inside the patch window (rip=0x%llx); giving up\n",
+            who, pid, (unsigned long long)ip);
+    errno = EAGAIN;
+    return -1;
 }
 
 static volatile sig_atomic_t g_stop;
@@ -353,7 +489,13 @@ int main(int argc, char **argv)
         printf("[ulp_ctl] Resolved %s = 0x%llx (%u bytes), %s = 0x%llx\n", tsym,
                (unsigned long long)req.target_vaddr, req.func_len, psym, (unsigned long long)req.patch_vaddr);
 
-        if (ioctl(fd, ULP_IOC_APPLY_PATCH, &req) < 0) {
+        int sr = ioctl_with_threads_stopped(fd, ULP_IOC_APPLY_PATCH, &req, req.target_pid,
+                                            req.target_vaddr, req.target_vaddr + 16);
+        if (sr == -2) {
+            close(fd);
+            return 1;
+        }
+        if (sr < 0) {
             int err = errno;
             perror("ioctl(ULP_IOC_APPLY_PATCH) failed");
             if (err == EPERM && !arm)
@@ -387,7 +529,13 @@ int main(int argc, char **argv)
             req.futex_vaddr = strtoull(argv[8], NULL, 16);
         }
 
-        if (ioctl(fd, ULP_IOC_APPLY_PATCH, &req) < 0) {
+        int sr = ioctl_with_threads_stopped(fd, ULP_IOC_APPLY_PATCH, &req, req.target_pid,
+                                            req.target_vaddr, req.target_vaddr + 16);
+        if (sr == -2) {
+            close(fd);
+            return 1;
+        }
+        if (sr < 0) {
             int err = errno;
             perror("ioctl(ULP_IOC_APPLY_PATCH) failed");
             if (err == EPERM && !arm)
@@ -410,7 +558,13 @@ int main(int argc, char **argv)
         req.target_pid = (pid_t)atoi(argv[2]);
         req.target_vaddr = strtoull(argv[3], NULL, 16);
 
-        if (ioctl(fd, ULP_IOC_REVERT_PATCH, &req) < 0) {
+        int sr = ioctl_with_threads_stopped(fd, ULP_IOC_REVERT_PATCH, &req, req.target_pid,
+                                            req.target_vaddr, req.target_vaddr + 16);
+        if (sr == -2) {
+            close(fd);
+            return 1;
+        }
+        if (sr < 0) {
             perror("ioctl(ULP_IOC_REVERT_PATCH) failed");
             close(fd);
             return 1;
