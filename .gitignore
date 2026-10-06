@@ -1,0 +1,35 @@
+# Build artifacts
+*.o
+*.ko
+*.so
+*.mod
+*.mod.c
+*.mod.o
+*.symvers
+*.order
+.tmp_versions/
+.cache.mk
+*.cmd
+*.tmp
+
+*.core
+__pycache__/
+
+
+# Built binaries
+ulp-driver/ulp_ctl
+ulp-driver/ulp_inject
+ulp-driver/test_vfs_protocol
+go-livepatch-bench/server*
+cross-arch-bench/bin_*
+target/
+
+# Local-only
+agy-resume.sh
+references/
+seabee/
+
+# Never commit private signing material
+*.key
+*.pem
+ulp-keys/gpg_batch

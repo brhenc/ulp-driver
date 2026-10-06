@@ -1,0 +1,28 @@
+[package]
+name = "rust-livepatch-bench"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "ulp_shadow"
+path = "src/lib.rs"
+crate-type = ["lib", "cdylib"]
+
+[[bin]]
+name = "pgrust_daemon"
+path = "src/bin/pgrust_daemon.rs"
+
+[[bin]]
+name = "pgrust_client"
+path = "src/bin/pgrust_client.rs"
+
+[[bin]]
+name = "int_expansion_demo"
+path = "src/bin/int_expansion_demo.rs"
+
+[dependencies]
+libc = "0.2"
+parking_lot = "0.12"
+lazy_static = "1.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

@@ -1,0 +1,81 @@
+From 8b4c291d9f8e7d6a5b4c3d2e1f0a9b8c7d6e5f4a Mon Sep 17 00:00:00 2001
+From: Bruno Henc <hencb@protonmail.com>
+Date: Tue, 22 Sep 2026 18:08:00 +0200
+Subject: [PATCH] rustc_codegen_llvm: add -Z patchable-function-entry=N[,M]
+
+Expose LLVM's function attribute `"patchable-function-entry"` via the
+unstable compiler flag `-Z patchable-function-entry=N[,M]`.
+
+This provides parity with GCC and Clang's `-fpatchable-function-entry=N[,M]`.
+It instructs the code generator to prepend a dedicated NOP landing sled
+at function prologues (N bytes total, with M bytes before the entry point).
+
+Motivation:
+1. Linux Kernel Livepatching (`klp`) and dynamic tracing (`ftrace`):
+   As more code in the Linux kernel is written in Rust (`rust/kernel`),
+   kernel livepatching requires dedicated function entry landing pads.
+2. Userspace Livepatching (ULP):
+   When injecting 16-byte atomic absolute trampolines (endbr64 + movabs + jmp)
+   into x86_64 binaries, leaf functions shorter than 16 bytes (e.g. 4-byte
+   accessor methods) can have their trampolines overwrite adjacent function
+   prologues in `.text`. Dedicated entry padding guarantees safe trampoline
+   space for any function size.
+
+Testing:
+Added `tests/codegen/patchable-function-entry.rs` to verify that
+`"patchable-function-entry"="16"` is emitted in LLVM IR.
+---
+ compiler/rustc_codegen_llvm/src/attributes.rs  |  6 ++++++
+ compiler/rustc_session/src/options.rs          |  2 ++
+ tests/codegen/patchable-function-entry.rs      | 11 +++++++++++
+ 3 files changed, 19 insertions(+)
+ create mode 100644 tests/codegen/patchable-function-entry.rs
+
+diff --git a/compiler/rustc_codegen_llvm/src/attributes.rs b/compiler/rustc_codegen_llvm/src/attributes.rs
+index e3c89b214a..4a1b2c3d5e 100644
+--- a/compiler/rustc_codegen_llvm/src/attributes.rs
++++ b/compiler/rustc_codegen_llvm/src/attributes.rs
+@@ -412,6 +412,12 @@ pub(crate) fn from_fn_attrs<'ll, 'tcx>(
+         to_add.push(llvm::Attribute::get(cx.llcx, "no-trapping-math", "true"));
+     }
+ 
++    if let Some(ref pfe) = cx.tcx.sess.opts.unstable_opts.patchable_function_entry {
++        let pfe_str = pfe.as_str();
++        let attr = llvm::CreateStringAttribute(cx.llcx, "patchable-function-entry", pfe_str);
++        to_add.push(attr);
++    }
++
+     for attr in to_add {
+         llfn.add_attribute(llvm::AttributeLoc::Function, attr);
+     }
+diff --git a/compiler/rustc_session/src/options.rs b/compiler/rustc_session/src/options.rs
+index d2a1b4c3e5..9f8e7d6a1b 100644
+--- a/compiler/rustc_session/src/options.rs
++++ b/compiler/rustc_session/src/options.rs
+@@ -1920,6 +1920,8 @@ options! {
+         "enable panic-unwind on wasm targets"),
+     panic_abort_tests: bool = (false, parse_bool, [TRACKED],
+         "support tests with panic=abort"),
++    patchable_function_entry: Option<String> = (None, parse_opt_string, [TRACKED],
++        "insert NOP sled at function entry for livepatching and tracing (e.g. 16 or 16,0)"),
+     parse_only: bool = (false, parse_bool, [UNTRACKED],
+         "parse only; do not compile, assemble, or link"),
+     perf_stats: bool = (false, parse_bool, [UNTRACKED],
+diff --git a/tests/codegen/patchable-function-entry.rs b/tests/codegen/patchable-function-entry.rs
+new file mode 100644
+index 0000000000..f1e2d3c4b5
+--- /dev/null
++++ b/tests/codegen/patchable-function-entry.rs
+@@ -0,0 +1,11 @@
++//@ compile-flags: -C no-prepopulate-passes -Z patchable-function-entry=16
++
++#![crate_type = "lib"]
++
++// CHECK: Function Attrs: {{.*}}"patchable-function-entry"="16"{{.*}}
++// CHECK-LABEL: @test_function
++#[no_mangle]
++pub fn test_function() {
++    // Empty function body
++}
+-- 
+2.46.1

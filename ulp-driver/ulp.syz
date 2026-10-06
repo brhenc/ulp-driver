@@ -1,0 +1,52 @@
+# Syzkaller Description for ulp-driver Userspace Livepatching Driver (/dev/ulp)
+# Target Architecture: x86_64
+
+include <linux/types.h>
+
+# Character device open
+openat$ulp(fd const[AT_FDCWD], file ptr[in, string["/dev/ulp"]], flags flags[open_flags], mode const[0]) fd_ulp
+
+# Sysctl Scope control
+openat$ulp_scope(fd const[AT_FDCWD], file ptr[in, string["/proc/sys/kernel/ulp_scope"]], flags flags[open_flags], mode const[0]) fd_ulp_scope
+write$ulp_scope(fd fd_ulp_scope, val ptr[in, string["0\n"]], len len[val])
+write$ulp_scope1(fd fd_ulp_scope, val ptr[in, string["1\n"]], len len[val])
+write$ulp_scope2(fd fd_ulp_scope, val ptr[in, string["2\n"]], len len[val])
+write$ulp_scope3(fd fd_ulp_scope, val ptr[in, string["3\n"]], len len[val])
+
+# /proc/ulp_patches query
+openat$ulp_patches(fd const[AT_FDCWD], file ptr[in, string["/proc/ulp_patches"]], flags flags[open_flags], mode const[0]) fd_ulp_patches
+read$ulp_patches(fd fd_ulp_patches, buf ptr[out, array[int8]], len len[buf])
+
+# UAPI Structures
+ulp_patch_req {
+    target_pid      pid
+    patch_name      stringnoz[64]
+    func_name       stringnoz[64]
+    target_vaddr    vma64
+    patch_vaddr     vma64
+    func_len        int32
+    futex_vaddr     vma64
+    orig_bytes      array[int8, 16]
+    patch_bytes     array[int8, 16]
+}
+
+ulp_patch_info {
+    target_pid      pid
+    owner_uid       uid
+    comm            stringnoz[16]
+    patch_name      stringnoz[64]
+    func_name       stringnoz[64]
+    target_vaddr    vma64
+    patch_vaddr     vma64
+    enabled         int32
+}
+
+ulp_list_req {
+    count           int32
+    entries         array[ulp_patch_info, 128]
+}
+
+# Ioctls
+ioctl$ULP_IOC_APPLY_PATCH(fd fd_ulp, cmd const[0xc0b07501], arg ptr[inout, ulp_patch_req])
+ioctl$ULP_IOC_REVERT_PATCH(fd fd_ulp, cmd const[0xc0b07502], arg ptr[inout, ulp_patch_req])
+ioctl$ULP_IOC_LIST_PATCHES(fd fd_ulp, cmd const[0xc0047503], arg ptr[out, ulp_list_req])
