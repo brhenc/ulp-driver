@@ -54,7 +54,7 @@ HAPROXY_BIN=$(readlink -f /usr/local/sbin/haproxy)
 PATCH_SO=$(readlink -f "$HAPROXY_DIR/patch_haproxy.so")
 
 # Remove any old rules and add rule for stktable_deinit
-rm -f /etc/ulp/persistent_rules.conf
+rm -f /etc/ulp/persistent_rules.conf /etc/ulp/preload_rules.conf
 ulp_persist add "$HAPROXY_BIN" "$PATCH_SO" "stktable_deinit" "livepatch_stktable_deinit" 16 1
 ulp_persist list
 

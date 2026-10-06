@@ -12,7 +12,7 @@
 #include <openssl/sha.h>
 #include "ulp_uapi.h"
 
-#define ULP_RULES_CONF "/etc/ulp/persistent_rules.conf"
+#define ULP_PRELOAD_RULES_CONF "/etc/ulp/preload_rules.conf"
 #define ULP_OVERRIDE_TICKET "/etc/ulp/override.ticket"
 #define ULP_HMAC_KEY "/etc/ulp/hmac.key"
 
@@ -121,30 +121,33 @@ static void ulp_early_exec_init(void)
     if (r <= 0) return;
     exe_path[r] = '\0';
 
-    /* Check if persistent rules configuration exists */
-    FILE *f = fopen(ULP_RULES_CONF, "r");
+    /*
+     * Preload rules: one per line,
+     *   <binary_path> <patch.so> <target_symbol> <patch_symbol> [func_len] [tramp_type]
+     * (written by `ulp_persist add`). Kernel exec rules live in a separate file.
+     */
+    FILE *f = fopen(ULP_PRELOAD_RULES_CONF, "r");
     if (!f) return;
 
-    char line[512];
+    char line[768];
+    char patch_so[256] = "", target_sym[64] = "", patch_sym[64] = "";
     struct ulp_kernel_rule_req rule;
     int rule_found = 0;
 
     while (fgets(line, sizeof(line), f)) {
         if (line[0] == '#' || line[0] == '\n') continue;
 
+        unsigned int flen = 0, ttype = 0;
         memset(&rule, 0, sizeof(rule));
-        unsigned long long pvaddr = 0;
-        int parsed = sscanf(line, "%127s %63s %63s %llx %u %u",
-                            rule.binary_path,
-                            rule.patch_name, rule.func_name,
-                            &pvaddr,
-                            &rule.func_len, &rule.tramp_type);
-        if (parsed >= 3) {
-            rule.patch_vaddr = (uint64_t)pvaddr;
-            if (strcmp(rule.binary_path, exe_path) == 0) {
-                rule_found = 1;
-                break;
-            }
+        int parsed = sscanf(line, "%127s %255s %63s %63s %u %u",
+                            rule.binary_path, patch_so, target_sym, patch_sym, &flen, &ttype);
+        if (parsed >= 4 && strcmp(rule.binary_path, exe_path) == 0) {
+            rule.func_len = flen;
+            rule.tramp_type = ttype;
+            strncpy(rule.patch_name, patch_sym, sizeof(rule.patch_name) - 1);
+            strncpy(rule.func_name, target_sym, sizeof(rule.func_name) - 1);
+            rule_found = 1;
+            break;
         }
     }
     fclose(f);
@@ -156,21 +159,18 @@ static void ulp_early_exec_init(void)
         return; /* Operator authorized bypass */
     }
 
-    /* Resolve Target Symbol Address in Running Process */
-    void *target_sym_addr = dlsym(RTLD_DEFAULT, rule.func_name);
+    /* Resolve the target symbol in the running process */
+    void *target_sym_addr = dlsym(RTLD_DEFAULT, target_sym);
     if (!target_sym_addr) {
         return;
     }
 
-    /* If patch_vaddr was not explicitly supplied, dynamically resolve from patch library */
-    if (rule.patch_vaddr == 0 && rule.patch_name[0] != '\0') {
-        void *patch_handle = dlopen(rule.patch_name, RTLD_NOW | RTLD_GLOBAL);
-        if (patch_handle) {
-            void *patch_sym = dlsym(patch_handle, rule.func_name);
-            if (patch_sym) {
-                rule.patch_vaddr = (uint64_t)(uintptr_t)patch_sym;
-            }
-        }
+    /* Load the patch library and resolve the replacement symbol in it */
+    void *patch_handle = dlopen(patch_so, RTLD_NOW | RTLD_GLOBAL);
+    if (patch_handle) {
+        void *addr = dlsym(patch_handle, patch_sym);
+        if (addr)
+            rule.patch_vaddr = (uint64_t)(uintptr_t)addr;
     }
 
     if (rule.patch_vaddr == 0) {

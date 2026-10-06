@@ -4,12 +4,13 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
 
 ## Correctness & safety
 
+- [x] `add-rule` checks the offset against the function's symbol and refuses rules whose trampoline would overrun the function (alignment padding counts); `add-rule <binary>:<symbol>` computes the offset, including for PIE.
+- [x] Kernel exec rules (`/etc/ulp/persistent_rules.conf`, `ulp_persist load-rules`) and preload rules (`/etc/ulp/preload_rules.conf`, `ulp_persist add` + `libulp_preload`) are now separate files; previously three parsers disagreed on one format.
+- [ ] **`libulp_preload` only finds exported symbols** (`dlsym(RTLD_DEFAULT)`), so targets in executables need `-rdynamic`. Resolve from the ELF symbol table instead, as `ulp_ctl` does.
 - [x] Persistent rules now carry the target's GNU build-id (recorded by `ulp_ctl add-rule`, or the `build_id=<hex>` field in `persistent_rules.conf`). The driver reads the running binary's build-id at exec time and skips stale rules. Remaining:
   - rules added through the `/dev/ulp` write interface (`ULP_CMD_ADD_RULE`) have no build-id field and stay unchecked
   - legacy rules without a build-id still apply (with a warning at registration); consider refusing them
   - binaries without a GNU build-id note (some static or Go builds) need a fallback, such as a content hash
-  - `ulp_persist add` writes lines in a different field order from what `ulp_persist load-rules` parses
-  - `add-rule` trusts the caller's `func_len`, like `apply` did (see the patchability item): a 16-byte rule on an 11-byte function overwrote the next function in testing
 - [ ] **Patch application is not atomic.** `ulp_atomic_direct_poke()` writes trampolines with `access_process_vm(FOLL_FORCE)` (copy-on-write plus `memcpy`), with no guarantee of a single 8-byte store. The 16-byte apply path writes bytes 8–15 of live code first. The code comments overstate this ("atomic", "core pipeline sync" for what is an `smp_mb()` IPI).
 - [ ] **The quiescence check is racy.** `ulp_verify_thread_quiescence()` reads `task_pt_regs(t)->ip`, which is stale for threads running in userspace on another CPU. Threads are not stopped, so a thread can enter the target between the check and the write. Stop the target's threads for the duration of the write (`ulp_inject` already stops them with ptrace) and retry or back off if one is inside the patched range.
 

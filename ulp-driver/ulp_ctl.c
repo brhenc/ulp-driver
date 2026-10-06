@@ -23,6 +23,8 @@ static void print_usage(const char *prog)
     fprintf(stderr, "                 resolve both symbols (patch.so must already be injected with ulp_inject)\n");
     fprintf(stderr, "  apply <pid> <patch_name> <func_name> <target_hex_vaddr> <patch_hex_vaddr> [func_len] [futex_hex_vaddr]\n");
     fprintf(stderr, "  revert <pid> <target_hex_vaddr>\n");
+    fprintf(stderr, "  add-rule <binary>:<symbol> <patch_name> [patch_vaddr_hex]\n");
+    fprintf(stderr, "                 persistent exec rule; patch_vaddr 0 (default) installs a 'return 0' stub\n");
     fprintf(stderr, "  add-rule <bin_path> <patch_name> <func_name> <target_offset_hex> <patch_vaddr_hex> [func_len] [match_uid] [global_scope]\n");
     fprintf(stderr, "  del-rule <bin_path> <target_offset_hex>\n");
     fprintf(stderr, "  list-rules\n");
@@ -59,7 +61,7 @@ struct sym_loc {
 
 /* Look up a defined function symbol in an ELF64 file: .symtab first, then .dynsym. */
 static int elf_find_func(const char *path, const char *name, uint64_t *value, uint64_t *size,
-                         int *is_pie, uint64_t *min_vaddr)
+                         int *is_pie, uint64_t *min_vaddr, uint64_t *next_func)
 {
     struct stat st;
     int fd, ret = -1;
@@ -116,6 +118,14 @@ static int elf_find_func(const char *path, const char *name, uint64_t *value, ui
                     break;
                 }
             }
+            if (ret == 0 && next_func) {
+                /* Lowest function start after this one: bytes up to it are alignment padding */
+                *next_func = UINT64_MAX;
+                for (uint64_t j = 0; j < n; j++)
+                    if (ELF64_ST_TYPE(syms[j].st_info) == STT_FUNC && syms[j].st_shndx != SHN_UNDEF &&
+                        syms[j].st_value > *value && syms[j].st_value < *next_func)
+                        *next_func = syms[j].st_value;
+            }
         }
     }
     if (ret < 0)
@@ -145,7 +155,7 @@ static int resolve_spec(pid_t pid, const char *spec, char *sym_out, size_t sym_l
         perror(file);
         return -1;
     }
-    if (elf_find_func(real, colon + 1, &value, &size, &is_pie, &min_vaddr) < 0)
+    if (elf_find_func(real, colon + 1, &value, &size, &is_pie, &min_vaddr, NULL) < 0)
         return -1;
 
     snprintf(maps_path, sizeof(maps_path), "/proc/%d/maps", pid);
@@ -177,6 +187,31 @@ static int resolve_spec(pid_t pid, const char *spec, char *sym_out, size_t sym_l
     loc->vaddr = is_pie ? (start - min_vaddr) + value : value;
     loc->size = size;
     return 0;
+}
+
+/* Page-aligned p_vaddr of the first executable PT_LOAD: the driver resolves PIE rule offsets from there. */
+static int elf_exec_seg_base(const char *path, uint64_t *base)
+{
+    Elf64_Ehdr eh;
+    int fd = open(path, O_RDONLY), ret = -1;
+
+    if (fd < 0)
+        return -1;
+    if (pread(fd, &eh, sizeof(eh), 0) == sizeof(eh) && eh.e_phentsize == sizeof(Elf64_Phdr)) {
+        for (int i = 0; i < eh.e_phnum; i++) {
+            Elf64_Phdr ph;
+
+            if (pread(fd, &ph, sizeof(ph), eh.e_phoff + (uint64_t)i * sizeof(ph)) != sizeof(ph))
+                break;
+            if (ph.p_type == PT_LOAD && (ph.p_flags & PF_X)) {
+                *base = ph.p_vaddr & ~(uint64_t)(sysconf(_SC_PAGESIZE) - 1);
+                ret = 0;
+                break;
+            }
+        }
+    }
+    close(fd);
+    return ret;
 }
 
 static volatile sig_atomic_t g_stop;
@@ -226,6 +261,28 @@ int main(int argc, char **argv)
         ulp_build_id_to_hex(id, len, hex);
         printf("%s\n", hex);
         return 0;
+    }
+
+    /* add-rule <binary>:<symbol> <patch_name> [patch_vaddr_hex]: resolve into the raw form below */
+    static char *sym_argv[10];
+    if (strcmp(action, "add-rule") == 0 && (argc == 4 || argc == 5) && strchr(argv[2], ':')) {
+        static char bin[PATH_MAX], sym[ULP_NAME_MAX], off[32];
+        const char *colon = strrchr(argv[2], ':');
+        uint64_t value, size, min_vaddr, seg_base;
+        int is_pie;
+
+        snprintf(bin, sizeof(bin), "%.*s", (int)(colon - argv[2]), argv[2]);
+        snprintf(sym, sizeof(sym), "%s", colon + 1);
+        if (elf_find_func(bin, sym, &value, &size, &is_pie, &min_vaddr, NULL) < 0 ||
+            elf_exec_seg_base(bin, &seg_base) < 0)
+            return 1;
+        /* The driver resolves PIE offsets from the start of the executable segment */
+        snprintf(off, sizeof(off), "0x%llx", (unsigned long long)(is_pie ? value - seg_base : value));
+        sym_argv[0] = argv[0]; sym_argv[1] = argv[1]; sym_argv[2] = bin; sym_argv[3] = argv[3];
+        sym_argv[4] = sym; sym_argv[5] = off; sym_argv[6] = argc == 5 ? argv[4] : (char *)"0";
+        sym_argv[7] = (char *)"16"; sym_argv[8] = NULL;
+        argv = sym_argv;
+        argc = 8;
     }
 
     int fd = open("/dev/ulp", O_RDWR);
@@ -377,6 +434,41 @@ int main(int argc, char **argv)
         rreq.func_len = (argc > 7) ? (uint32_t)strtoul(argv[7], NULL, 0) : 16;
         rreq.match_uid = (argc > 8) ? (uint32_t)atoi(argv[8]) : (uint32_t)-1;
         rreq.global_scope = (argc > 9) ? (uint8_t)atoi(argv[9]) : 1;
+
+        /*
+         * Check the rule against the binary's symbol table: the offset must be the start of
+         * func_name, and the function must be large enough for the trampoline that will be
+         * written (16 bytes for the stub and absolute jump, 5 for the relative jump).
+         */
+        {
+            uint64_t value, size, min_vaddr, seg_base, expect, next_func, room;
+            int is_pie;
+            /* Same choice as the trampoline construction below: stub or func_len >= 16 -> 16 bytes, else 5 */
+            uint32_t need = (rreq.patch_vaddr != 0 && rreq.func_len < 16) ? 5 : 16;
+
+            if (elf_find_func(rreq.binary_path, rreq.func_name, &value, &size, &is_pie, &min_vaddr, &next_func) == 0 &&
+                elf_exec_seg_base(rreq.binary_path, &seg_base) == 0) {
+                expect = is_pie ? value - seg_base : value;
+                if (expect != rreq.target_offset) {
+                    fprintf(stderr, "Refusing: target offset 0x%llx is not the start of '%s' (expected 0x%llx)\n",
+                            (unsigned long long)rreq.target_offset, rreq.func_name, (unsigned long long)expect);
+                    close(fd);
+                    return 1;
+                }
+                /* The trampoline may extend into alignment padding, but not into the next function */
+                room = (next_func != UINT64_MAX && next_func - value > size) ? next_func - value : size;
+                if (room < need) {
+                    fprintf(stderr, "Refusing: '%s' is %llu bytes (%llu with padding), but this rule writes %u bytes; "
+                            "it would overwrite the following code\n",
+                            rreq.func_name, (unsigned long long)size, (unsigned long long)room, need);
+                    close(fd);
+                    return 1;
+                }
+            } else {
+                fprintf(stderr, "Warning: cannot find '%s' in the symbol table of %s; offset and size not checked\n",
+                        rreq.func_name, rreq.binary_path);
+            }
+        }
 
         /* Record the binary's build-id so the driver skips this rule if the binary is replaced */
         int idlen = ulp_read_build_id(rreq.binary_path, rreq.build_id, sizeof(rreq.build_id));

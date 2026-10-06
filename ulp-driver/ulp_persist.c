@@ -14,7 +14,8 @@
 #include "ulp_buildid.h"
 
 #define ULP_CONFIG_DIR "/etc/ulp"
-#define ULP_RULES_CONF "/etc/ulp/persistent_rules.conf"
+#define ULP_RULES_CONF "/etc/ulp/persistent_rules.conf"   /* kernel exec rules (load-rules) */
+#define ULP_PRELOAD_RULES_CONF "/etc/ulp/preload_rules.conf"  /* libulp_preload rules (add) */
 #define ULP_OVERRIDE_TICKET "/etc/ulp/override.ticket"
 #define ULP_HMAC_KEY "/etc/ulp/hmac.key"
 
@@ -58,9 +59,9 @@ static int add_rule(const char *bin_path, const char *patch_so,
                     uint32_t func_len, uint32_t tramp_type)
 {
     ensure_config_dir();
-    FILE *f = fopen(ULP_RULES_CONF, "a");
+    FILE *f = fopen(ULP_PRELOAD_RULES_CONF, "a");
     if (!f) {
-        perror("[-] Failed to open persistent_rules.conf");
+        perror("[-] Failed to open " ULP_PRELOAD_RULES_CONF);
         return 1;
     }
 
@@ -267,7 +268,11 @@ static void print_usage(const char *prog)
     printf("Usage: %s <command> [args...]\n", prog);
     printf("Commands:\n");
     printf("  add <bin_path> <patch_so> <target_sym> <patch_sym> [func_len] [tramp_type]\n");
-    printf("      Register a persistent auto-livepatch rule for an executable\n");
+    printf("      Add a preload rule (" ULP_PRELOAD_RULES_CONF "), applied by libulp_preload.so\n");
+    printf("  load-rules\n");
+    printf("      Load kernel exec rules from " ULP_RULES_CONF ", one per line:\n");
+    printf("      <bin> <patch_name> <func> <target_off_hex> <patch_vaddr_hex> [func_len] [uid] [global] [build_id=<hex>]\n");
+    printf("      (get build_id with `ulp_ctl build-id <bin>`; rules without it are not checked against binary updates)\n");
     printf("  list\n");
     printf("      List all registered persistent livepatch rules\n");
     printf("  generate-key\n");
