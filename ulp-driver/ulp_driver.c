@@ -213,7 +213,8 @@ static atomic_t g_active_rules = ATOMIC_INIT(0);
 
 /* =========================================================================
  * Driver Resumption & State Handoff Architecture
- * ========================================================================= */
+ * =========================================================================
+ */
 #define ULP_STATE_MAGIC 0x554C505354415445ULL /* "ULPSTATE" */
 #define ULP_STATE_VERSION 2 /* v2: rules carry a build-id */
 #define ULP_DEFAULT_STATE_FILE "/run/ulp/state.bin"
@@ -269,6 +270,7 @@ static int ulp_allow_resumption_set(const char *val, const struct kernel_param *
 	} else {
 		int count = atomic_read(&g_active_patches);
 		int i;
+
 		for (i = 0; i < count; i++) {
 			if (try_module_get(THIS_MODULE))
 				atomic_inc(&g_pinned_refs);
@@ -380,9 +382,8 @@ static bool ulp_check_access(struct task_struct *task, struct mm_struct *mm, boo
 	}
 
 	/* Mode 2 & 3: Root (CAP_SYS_ADMIN) only */
-	if (current_scope >= ULP_SCOPE_ROOT_ONLY) {
+	if (current_scope >= ULP_SCOPE_ROOT_ONLY)
 		return capable(CAP_SYS_ADMIN);
-	}
 
 	/* Mode 1 (ULP_SCOPE_USER_SAME_UID): Root OR matching UID/EUID/SUID for unprivileged users */
 	if (capable(CAP_SYS_ADMIN))
@@ -459,6 +460,7 @@ static int ulp_verify_thread_quiescence(struct task_struct *task, __u64 vaddr_st
 	rcu_read_lock();
 	for_each_thread(task, t) {
 		struct pt_regs *regs;
+
 		if (++iters > ULP_MAX_LOOP_ITERS) {
 			pr_warn_ratelimited("[ulp_driver] Quiescence check reached max thread loop bound\n");
 			break;
@@ -1150,6 +1152,7 @@ static int ulp_probe_fork(struct kprobe *p, struct pt_regs *regs)
 
 	if (count > 0) {
 		struct ulp_patch_entry *c_entry, *c_tmp;
+
 		spin_lock_irqsave(&g_patch_lock, flags);
 		list_for_each_entry_safe(c_entry, c_tmp, &local_clones, list) {
 			list_del(&c_entry->list);
@@ -1266,11 +1269,10 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	VMA_ITERATOR(vmi, mm, 0);
 	for_each_vma(vmi, vma) {
 		if ((vma->vm_flags & VM_EXEC) && vma->vm_file && (vma->vm_file == mm->exe_file)) {
-			if (ework->rule.target_offset >= vma->vm_start && ework->rule.target_offset < vma->vm_end) {
+			if (ework->rule.target_offset >= vma->vm_start && ework->rule.target_offset < vma->vm_end)
 				target_vaddr = ework->rule.target_offset; /* Non-PIE absolute */
-			} else {
+			else
 				target_vaddr = vma->vm_start + ework->rule.target_offset; /* PIE relative */
-			}
 			exe_file = get_file(vma->vm_file);
 			break;
 		}
@@ -1321,7 +1323,6 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	 */
 	p_entry = kzalloc(sizeof(*p_entry), GFP_KERNEL);
 	if (!p_entry) {
-		pr_err("[ulp_driver] Failed to allocate patch tracking entry for PID %d\n", task->pid);
 		ulp_unpin_module_ref();
 		kfree(ework);
 		return;
@@ -1436,6 +1437,7 @@ static int ulp_probe_exec(struct kprobe *p, struct pt_regs *regs)
 			/* Check Parent PID hierarchy under RCU protection */
 			if (rule->req.parent_pid != 0) {
 				pid_t ppid = 0, rppid = 0;
+
 				rcu_read_lock();
 				if (task->real_parent)
 					rppid = task->real_parent->pid;
@@ -1557,7 +1559,7 @@ static int ulp_proc_show(struct seq_file *m, void *v)
 
 	seq_printf(m, "%-7s %-6s %-16s %-22s %-22s %-18s %-18s %-5s %s\n",
 			   "PID", "UID", "PROCESS", "PATCH_NAME", "FUNCTION", "ORIG_ADDR", "PATCH_ADDR", "LEN", "STATUS");
-	seq_printf(m, "------------------------------------------------------------------------------------------------------------------------------------\n");
+	seq_puts(m, "------------------------------------------------------------------------------------------------------------------------------------\n");
 
 	spin_lock_irqsave(&g_patch_lock, flags);
 	ulp_reap_dead_entries_locked();
@@ -1697,6 +1699,7 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 	switch (cmd.cmd_type) {
 	case ULP_CMD_ARM: {
 		u32 ttl = cmd.ttl_seconds ? cmd.ttl_seconds : 60;
+
 		if (ttl > 300)
 			ttl = 300;
 
@@ -1935,6 +1938,7 @@ static int ulp_save_state(void)
 
 	if (patch_cnt > 0) {
 		size_t bytes_to_write = patch_cnt * sizeof(*prec_buf);
+
 		written = kernel_write(file, prec_buf, bytes_to_write, &pos);
 		if (written != bytes_to_write) {
 			pr_err("[ulp_driver] Failed to write patch records to %s\n", filepath);
@@ -1945,6 +1949,7 @@ static int ulp_save_state(void)
 
 	if (rule_cnt > 0) {
 		size_t bytes_to_write = rule_cnt * sizeof(*rrec_buf);
+
 		written = kernel_write(file, rrec_buf, bytes_to_write, &pos);
 		if (written != bytes_to_write) {
 			pr_err("[ulp_driver] Failed to write rule records to %s\n", filepath);
@@ -2111,9 +2116,8 @@ static int ulp_restore_state(void)
 
 	/* Invalidate state file so it is not re-adopted again */
 	file = filp_open(filepath, O_WRONLY | O_TRUNC, 0);
-	if (!IS_ERR(file)) {
+	if (!IS_ERR(file))
 		filp_close(file, NULL);
-	}
 
 	pr_info("[ulp_driver] Resumption complete: %u patches and %u rules re-adopted.\n",
 			resumed_patches, resumed_rules);
@@ -2154,32 +2158,28 @@ static int __init ulp_init(void)
 	kp_fork.symbol_name = "wake_up_new_task";
 	kp_fork.pre_handler = ulp_probe_fork;
 	ret = register_kprobe(&kp_fork);
-	if (ret) {
+	if (ret)
 		pr_warn("[ulp_driver] Warning: Failed to register fork kprobe: %d\n", ret);
-	} else {
+	else
 		g_kp_fork_registered = true;
-	}
 
 	/* Register Execve Auto-Patching Kprobe */
 	kp_exec.symbol_name = "arch_setup_additional_pages";
 	kp_exec.pre_handler = ulp_probe_exec;
 	ret = register_kprobe(&kp_exec);
-	if (ret) {
+	if (ret)
 		pr_warn("[ulp_driver] Warning: Failed to register exec kprobe: %d\n", ret);
-	} else {
+	else
 		g_kp_exec_registered = true;
-	}
 
 	ulp_sysctl_header = register_sysctl("kernel", ulp_sysctl_table);
-	if (!ulp_sysctl_header) {
+	if (!ulp_sysctl_header)
 		pr_warn("[ulp_driver] Warning: Failed to register /proc/sys/kernel/ulp_scope\n");
-	}
 
 	proc_create("ulp_patches", 0444, NULL, &ulp_proc_ops);
 
-	if (ulp_resume || ulp_allow_resumption) {
+	if (ulp_resume || ulp_allow_resumption)
 		ulp_restore_state();
-	}
 
 	pr_info("[ulp_driver] loaded (/proc/sys/kernel/ulp_scope=%d, allow_resumption=%d)\n",
 			ulp_scope, ulp_allow_resumption);
@@ -2207,9 +2207,8 @@ static void __exit ulp_exit(void)
 	remove_proc_entry("ulp_patches", NULL);
 	misc_deregister(&ulp_misc_device);
 
-	if (READ_ONCE(ulp_allow_resumption)) {
+	if (READ_ONCE(ulp_allow_resumption))
 		ulp_save_state();
-	}
 
 	spin_lock_irqsave(&g_rule_lock, rflags);
 	list_for_each_entry_safe(rule, rtmp, &g_rule_list, list) {
