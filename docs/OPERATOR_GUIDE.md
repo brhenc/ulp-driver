@@ -9,7 +9,7 @@
 
 ## 1. Subsystem Overview & Core Concepts
 
-**ulp-driver** provides a high-assurance, in-kernel userspace livepatching subsystem (`ulp_driver.ko`) and userspace orchestration utilities (`ulp_ctl`, `ulp_inject`). It allows systems operators and site reliability engineers to hotpatch mission-critical server daemons (such as **HAProxy**, **MariaDB**, **PostgreSQL**, and **FRRouting**) in real time with **zero dropped connections, zero socket resets, and zero downtime**.
+**ulp-driver** is an experimental userspace livepatching driver (`ulp_driver.ko`) with userspace tools (`ulp_ctl`, `ulp_inject`). It lets an operator replace functions in running daemons (tested with **HAProxy**, **MariaDB** and **PostgreSQL**) without restarting them, so established connections are kept. See the README's "Status & limitations" before relying on it.
 
 ### Architectural Invariants
 
@@ -33,7 +33,7 @@ insmod ulp_driver.ko [dev_mode=1] [allow_resumption=1] [resume=1]
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `dev_mode` | `bool` | `false` | Developer mode. Permits module unloading and scope relaxation in Scope 3 for testing and development environments. |
-| `allow_resumption` | `bool` | `false` | **Zero-Downtime Module Reloading**. When set to `1`, unloading the module (`rmmod ulp_driver`) writes the active patch registry to `/run/ulp/state.bin` and leaves userspace trampolines intact. If set to `0`, unloading reverts all patches or rejects unload if patches are active. |
+| `allow_resumption` | `bool` | `false` | **Module reloading without reverting patches**. When set to `1`, unloading the module (`rmmod ulp_driver`) writes the active patch registry to `/run/ulp/state.bin` and leaves userspace trampolines intact. If set to `0`, unloading reverts all patches or rejects unload if patches are active. |
 | `resume` | `bool` | `false` | **Automatic State Recovery**. When set to `1` during `insmod`, the driver scans `/run/ulp/state.bin`, validates memory trampolines against active process PIDs, and automatically re-adopts all patches into `/proc/ulp_patches`. |
 
 ### Sysctl Security Ratchet (`kernel.ulp_scope`)
@@ -151,7 +151,7 @@ ulp_inject <pid> <path_to_so>
 
 ---
 
-### Procedure B: Upgrading the ULP Kernel Module with Zero Downtime
+### Procedure B: Upgrading the ULP Kernel Module Without Reverting Patches
 
 When `ulp_driver.ko` needs to be updated or upgraded for bugfixes or security maintenance:
 

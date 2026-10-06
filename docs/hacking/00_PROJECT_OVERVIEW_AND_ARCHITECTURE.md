@@ -16,7 +16,7 @@ Traditional software deployment relies on CI/CD compiling a new binary, tearing 
 * **Maintenance Windows & Outage Windows**: DBA interventions require late-night coordination.
 
 **The ULP Vision**:
-Instead of replacing the running binary on disk and restarting, the running process is continuously updated in-memory via atomic userspace livepatches across multiple software generations ($V_0 \to V_1 \to V_2 \to V_3 \dots \to V_n$), with 100% reversible, 1-click atomic rollback to any prior state.
+Instead of replacing the running binary on disk and restarting, the running process is continuously updated in-memory via userspace livepatches across multiple software generations ($V_0 \to V_1 \to V_2 \to V_3 \dots \to V_n$), with 100% reversible, 1-click atomic rollback to any prior state.
 
 ```
  Traditional CI/CD: [ Build ] ──► [ Kill Process ] ──► [ Cold Restart ] ──► [ Cache Rebuild ]
@@ -94,7 +94,7 @@ ulp-driver/
 ├── mariadb-livepatch-bench/               # MariaDB 11.8 C++ Livepatch Suite
 │   ├── patch_mariadb_maxconn.c            # Dynamic max_connections function livepatch
 │   ├── update_socket_backlog.c            # Safe in-process socket listen backlog expansion
-│   └── test_socket_backlog_live_expansion.py # Zero-downtime ss -tlpn Send-Q test harness
+│   └── test_socket_backlog_live_expansion.py # Live ss -tlpn Send-Q expansion test harness
 ├── postgres-livepatch-bench/              # PostgreSQL 17 multi-version livepatch modules
 ├── haproxy-multi-patch/                   # HAProxy 3.0 multi-commit livepatch modules
 ├── cross-arch-bench/                      # 6-Architecture QEMU Emulation Verification Suite
@@ -108,15 +108,15 @@ ulp-driver/
 
 ## 4. Git Branching Strategy & Conventions
 
-* **`master`**: Stable production-ready baseline.
+* **`master`**: Stable baseline.
 * **`rust-support`**: Core Rust livepatching, shadow memory allocator, MariaDB socket backlog expansion.
 * **`golang-support`**: Active development branch containing Golang `ABIInternal` support, cross-architecture test suites (x86_64, aarch64, riscv64, s390x, ppc64le, loongarch64), and developer hacking documentation.
 
 ---
 
-## 5. NASA JPL "Power of 10" Engineering Rules Applied
+## 5. Coding Rules
 
-To meet enterprise and mission-critical reliability standards, the codebase adheres to strict engineering constraints:
+The driver follows these constraints (some adapted from JPL's "Power of 10" rules):
 
 1. **Allocate-Before-Commit**: All kernel memory structures are allocated *before* any text modification. A livepatch can never be orphaned in a half-patched state due to kernel OOM.
 2. **Atomic 8-Byte Text Poking**: Eliminates `INT3` trap hazards and unhandled `SIGTRAP` signals during patch activation.

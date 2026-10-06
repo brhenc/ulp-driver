@@ -1,8 +1,10 @@
-# Post-Quantum Cryptography (PQC), In-Kernel Verification & Hybrid Signing
+# Post-Quantum Cryptography (PQC) & Hybrid Signing (Experimental)
+
+> **Status:** `tools/ulp_pqc_signer.py` is a Dilithium-style toy implementation written to explore hybrid signing. It is **not** FIPS 204 ML-DSA, does not interoperate with real ML-DSA libraries, and must not be used for anything security-relevant. Signatures are checked by a userspace pre-flight tool, not by the kernel driver. See `TODO.md`.
 
 **Module:** Advanced Cryptographic Attestation & Quantum Resilience  
 **Path:** `docs/hacking/10_POST_QUANTUM_CRYPTO_AND_SIGNING.md`  
-**Standard:** NIST FIPS 204 (ML-DSA / CRYSTALS-Dilithium) & FIPS 205 (SLH-DSA / SPHINCS+)  
+**Background:** NIST FIPS 204 (ML-DSA / CRYSTALS-Dilithium) & FIPS 205 (SLH-DSA / SPHINCS+)  
 **Policy Framework:** CRI-O / Sigstore Hybrid Dual-Layer Supply-Chain Security  
 
 ---
@@ -73,7 +75,7 @@ Livepatching injects raw machine instructions directly into running kernel and u
   * Sigstore has prototype branches utilizing **Cloudflare CIRCL** (`github.com/cloudflare/circl`) supporting **ML-DSA-44/65/87** and **Hybrid Ed25519 + ML-DSA-65**.
 * **PKCS#11 & Custom PQC Signers:**
   * Cosign supports external hardware security modules (HSMs) and OpenSSL 3.x with **`oqsprovider` (Open Quantum Safe)**.
-* **ULP Solution:** ulp-driver implements a **Hybrid Envelope Attestation Engine** that pairs Cosign's ECDSA transparency with NIST FIPS 204 ML-DSA-65 post-quantum lattice verification.
+* **Experiment:** a hybrid envelope that pairs a cosign ECDSA signature with a Dilithium-style lattice signature (modelled on ML-DSA-65, not conformant to FIPS 204).
 
 ---
 
@@ -180,11 +182,11 @@ Executed on **Local Host**, **`debian-13` VM**, and **`fedora-44` VM**:
 
 | Test Case | Scenario Description | Expected Result | Result |
 | :--- | :--- | :---: | :---: |
-| **Test 1** | Pure NIST FIPS 204 ML-DSA-65 Signature | **PASS (Valid)** | **PASSED (100%)** |
-| **Test 2** | Tampered Payload Binary Detection | **FAIL (Rejected)** | **PASSED (100%)** |
-| **Test 3** | Untrusted Attacker PQC Key Signature | **FAIL (Rejected)** | **PASSED (100%)** |
-| **Test 4** | Hybrid Dual-Layer (ECDSA + ML-DSA-65) | **PASS (Valid)** | **PASSED (100%)** |
-| **Test 5** | Fail-Closed: Corrupted Classical Layer | **FAIL (Rejected)** | **PASSED (100%)** |
-| **Test 6** | Production Targets (HAProxy, MariaDB, Postgres) | **PASS (All 3)** | **PASSED (100%)** |
+| **Test 1** | Dilithium-style (toy) signature | **PASS (Valid)** | **Passed** |
+| **Test 2** | Tampered Payload Binary Detection | **FAIL (Rejected)** | **Passed** |
+| **Test 3** | Untrusted Attacker PQC Key Signature | **FAIL (Rejected)** | **Passed** |
+| **Test 4** | Hybrid Dual-Layer (ECDSA + ML-DSA-65) | **PASS (Valid)** | **Passed** |
+| **Test 5** | Fail-Closed: Corrupted Classical Layer | **FAIL (Rejected)** | **Passed** |
+| **Test 6** | Production Targets (HAProxy, MariaDB, Postgres) | **PASS (All 3)** | **Passed** |
 
-All tests passed with 100% success across Debian 13 and Fedora 44.
+These results are from an earlier run. The suite currently fails with an import error (see `TODO.md`).

@@ -8,7 +8,7 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 
 | Guide | Description | Key Topics |
 | :--- | :--- | :--- |
-| [**`00_PROJECT_OVERVIEW_AND_ARCHITECTURE.md`**](/docs/hacking/00_PROJECT_OVERVIEW_AND_ARCHITECTURE.md) | **Master Architecture Blueprint** | System vision, continuous daemon evolution without restarts, end-to-end stack, NASA JPL Power of 10 rules. |
+| [**`00_PROJECT_OVERVIEW_AND_ARCHITECTURE.md`**](/docs/hacking/00_PROJECT_OVERVIEW_AND_ARCHITECTURE.md) | **Master Architecture Blueprint** | System vision, continuous daemon evolution without restarts, end-to-end stack, coding rules. |
 | [**`01_KERNEL_DRIVER_INTERNALS.md`**](/docs/hacking/01_KERNEL_DRIVER_INTERNALS.md) | **Kernel Driver Subsystem (`/dev/ulp`)** | Data structures, Fail-Closed Arming State Machine, atomic 8-byte text poke, dead PID reaping, sysctl ratchet. |
 | [**`02_SAFE_INJECTION_AND_TRAMPOLINE_ENGINE.md`**](/docs/hacking/02_SAFE_INJECTION_AND_TRAMPOLINE_ENGINE.md) | **Low-Level Injector (`ulp_inject`)** | Red-zone evasion (`RSP - 512`), neutralizing `ERESTARTSYS` rollback (`orig_rax = -1`), Intel CET IBT, shadow variables. |
 | [**`03_MULTI_LANGUAGE_SUPPORT_GUIDE.md`**](/docs/hacking/03_MULTI_LANGUAGE_SUPPORT_GUIDE.md) | **C, C++, Rust & Golang Guide** | Itanium C++ mangling/vtables, Rust memory immutability, Go `ABIInternal` register models & pinned `g` register. |
@@ -17,7 +17,7 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 | [**`06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md`**](/docs/hacking/06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md) | **Operator Dashboard & Tooling** | Curses TUI (`tools/ulp_tui.py`), Plan 9 VFS telemetry, Cosign/GPG verification, continuous multi-generation suite. |
 | [**`07_LKML_SUBMISSION_PLAYBOOK.md`**](/docs/hacking/07_LKML_SUBMISSION_PLAYBOOK.md) | **LKML Upstream Submission Playbook** | `CONFIG_USERSPACE_LIVEPATCH`, reviewer pushback answers (Peter Zijlstra, Josh Poimboeuf), `checkpatch.pl`, patch submission. |
 | [**`08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md`**](/docs/hacking/08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md) | **Development & Test Automation** | Debian 13 VM (`192.168.122.171`), building `ulp_driver.ko`, running all automated benchmarks, writing new livepatches. |
-| [**`09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`**](/docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md) | **Canary Routing & MULTICS Fault Recovery** | Progressive 1% canary traffic sampling, Tramp-Backup passthrough, zero-crash SEGV fault trapping, and kernel auto-rollback. |
+| [**`09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`**](/docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md) | **Canary Routing & Fault Recovery** | 1% canary traffic sampling, trampoline passthrough, SIGSEGV trapping in patched code, and auto-rollback (experimental). |
 | [**`10_POST_QUANTUM_CRYPTO_AND_SIGNING.md`**](/docs/hacking/10_POST_QUANTUM_CRYPTO_AND_SIGNING.md) | **Post-Quantum Crypto (PQC) & Hybrid Attestation** | NIST FIPS 204 ML-DSA-65 (CRYSTALS-Dilithium), Linux in-kernel PQC feasibility (SHAKE-256), Cosign PQC roadmap, Hybrid signing envelopes. |
 
 ---
@@ -28,7 +28,7 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 # 1. Multi-Daemon Continuous Evolution Suite (pgrust, MariaDB, Postgres, HAProxy)
 python3 tests/test_multi_version_continuous_suite.py
 
-# 2. MariaDB Zero-Downtime Socket Backlog Expansion (ss -tlpn Send-Q 80 -> 300)
+# 2. MariaDB Socket Backlog Expansion Without Restart (ss -tlpn Send-Q 80 -> 300)
 python3 mariadb-livepatch-bench/test_socket_backlog_live_expansion.py
 
 # 3. Golang Multi-Version Continuous Livepatch Suite (server_go)

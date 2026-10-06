@@ -20,12 +20,12 @@ sudo ./examples/test_all_examples.sh
                          FINAL EXECUTION SUMMARY                                
 ================================================================================
   [PASS]  01_basic_c_service (1s) - Basic C Service Livepatching & Reversion
-  [PASS]  02_driver_resumption_zero_downtime (1s) - Driver Unload, State Resumption & Zero Downtime
+  [PASS]  02_driver_resumption_zero_downtime (1s) - Driver Unload & State Resumption
   [PASS]  03_rust_livepatch (2s) - Rust Application Livepatching & ABI Safety
   [PASS]  04_exec_rule_persistence (0s) - In-Kernel Persistent Execve Startup Rules
 --------------------------------------------------------------------------------
   Total Suites Executed: 4 / 4
-  Overall Status:        100% PASSED
+  Overall Status:        all passed
   Total Time Elapsed:    4 seconds
 ================================================================================
 ```
@@ -37,7 +37,7 @@ sudo ./examples/test_all_examples.sh
 | Example | Directory | Target Language | Core Concept Demonstrated |
 | :--- | :--- | :--- | :--- |
 | **01** | [`01_basic_c_service/`](./01_basic_c_service/) | C | Basic runtime injection, function patching, and clean rollback. |
-| **02** | [`02_driver_resumption_zero_downtime/`](./02_driver_resumption_zero_downtime/) | C | Kernel driver unload/reload (`allow_resumption=1`, `resume=1`) with continuous zero-downtime traffic. |
+| **02** | [`02_driver_resumption_zero_downtime/`](./02_driver_resumption_zero_downtime/) | C | Kernel driver unload/reload (`allow_resumption=1`, `resume=1`) while the service keeps serving traffic. |
 | **03** | [`03_rust_livepatch/`](./03_rust_livepatch/) | Rust | Rust ABI considerations (`#[no_mangle]`, `extern "C"`), cdylib injection, and PIE symbol resolution. |
 | **04** | [`04_exec_rule_persistence/`](./04_exec_rule_persistence/) | C | In-kernel persistent `execve` startup rules (`ulp_ctl add-rule`). |
 
@@ -51,7 +51,7 @@ sudo ./examples/test_all_examples.sh
 ### Step-by-Step Walkthrough
 
 1. **Write Target Function**:
-   Target functions must be non-inlined and 16-byte aligned to guarantee atomic word overlay updates:
+   Target functions must be non-inlined and 16-byte aligned (the driver requires 8-byte aligned patch sites):
    ```c
    __attribute__((noinline, aligned(16)))
    const char *get_service_status(void) {
@@ -111,7 +111,7 @@ sudo ./examples/test_all_examples.sh
 
 ---
 
-## Example 2: Kernel Driver Resumption & Zero-Downtime Reloading
+## Example 2: Kernel Driver Resumption Across Module Reloads
 
 * **Path**: [`examples/02_driver_resumption_zero_downtime/`](./02_driver_resumption_zero_downtime/)
 * **Objective**: Demonstrates how to upgrade or patch `ulp_driver.ko` itself without dropping active userspace livepatches or interrupting production services.
@@ -131,7 +131,7 @@ sudo ./examples/test_all_examples.sh
         │     └─► Driver UNLOADED from kernel
         │
         ├─► [DRIVER OFFLINE / UPGRADING]
-        │     └─► Daemon serves queries with 100% ZERO DOWNTIME!
+        │     └─► Daemon keeps serving patched code with the driver unloaded
         │
         └─► insmod ulp_driver.ko resume=1 allow_resumption=1
               └─► Deserializes /run/ulp/state.bin

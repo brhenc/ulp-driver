@@ -58,13 +58,14 @@ When preparing a patchset or RFC for the Linux Kernel Mailing List (`linux-kerne
   ```
 
 ### Layer B: QEMU Full System Virtualization (`virsh` / `qemu-system-*`)
+* **Status**: Planned; the driver itself is currently x86_64-only.
 * **Purpose**: Full kernel driver validation (`/dev/ulp`) under native architecture SMP memory ordering, cache flushes, and page table walks.
 
 ---
 
-## 4. Verification Results: 6 Architectures 100% Passed
+## 4. Emulation Results (QEMU user-mode, trampoline encodings only)
 
-Verified live across all 6 architectures via [`cross-arch-bench/run_cross_arch_emulation_suite.py`](/cross-arch-bench/run_cross_arch_emulation_suite.py):
+Trampoline encodings tested under QEMU user-mode emulation for all 6 architectures via [`cross-arch-bench/run_cross_arch_emulation_suite.py`](/cross-arch-bench/run_cross_arch_emulation_suite.py):
 
 ```
 ==============================================================================
@@ -116,11 +117,11 @@ Verified live across all 6 architectures via [`cross-arch-bench/run_cross_arch_e
 ==============================================================================
    MULTI-ARCHITECTURE EMULATION BENCHMARK SUMMARY                             
 ==============================================================================
-  * x86_64         : SUCCESS (100% PASSED)
-  * aarch64        : SUCCESS (100% PASSED)
-  * riscv64        : SUCCESS (100% PASSED)
-  * s390x          : SUCCESS (100% PASSED)
-  * ppc64le        : SUCCESS (100% PASSED)
-  * loongarch64    : SUCCESS (100% PASSED)
+  * x86_64         : PASS
+  * aarch64        : PASS
+  * riscv64        : PASS
+  * s390x          : PASS
+  * ppc64le        : PASS
+  * loongarch64    : PASS
 ==============================================================================
 ```

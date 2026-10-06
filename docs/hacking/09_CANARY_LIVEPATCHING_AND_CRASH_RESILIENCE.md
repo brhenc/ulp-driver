@@ -1,8 +1,8 @@
-# Canary Livepatching, MULTICS-Style Error Recovery & Crash Resilience
+# Canary Livepatching & Fault Recovery (Experimental)
 
 **Module:** Advanced Reliability & Self-Healing Architecture  
 **Path:** `docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`  
-**Vision:** Zero-Crash Livepatching, Progressive 1% Canary Routing, and Auto-Rollback on Faults  
+**Goal:** Progressive 1% canary routing, and automatic rollback when patched code faults  
 **Tested Targets:** High-Throughput Edge Daemon (`server_daemon.c`) & Production **HAProxy 3.5-dev3**  
 **Verified Environments:** `debian-13` (Linux Kernel 6.12.x) & `fedora-44` (Linux Kernel 7.1.x)  
 
@@ -35,7 +35,7 @@ By combining **Statistical Canary Routing** with **ULP Fault-Trap Auto-Rollback*
                              │
                              ▼
                    ┌───────────────────────────────────────────┐
-                   │ ULP MULTICS-Style Exception Trap Handler  │
+                   │ ULP Exception Trap Handler  │
                    │ 1. Intercepts SIGSEGV on sigaltstack      │
                    │ 2. Atomically auto-quarantines patch      │
                    │ 3. Restores target text / points to V0    │
@@ -107,7 +107,7 @@ promote_canary(haproxy_pid, ratio_vaddr, 10000)  # 100.00% (Full Rollout)
 
 ---
 
-## 3. Part 2: How MULTICS-Style Zero-Crash Error Recovery Works
+## 3. Part 2: How Fault Recovery Works
 
 ### 3.1 The Failure Mode Under Standard Linux
 1. Livepatch contains a fat-finger bug (e.g. `volatile int *p = NULL; *p = 0xDEAD;`).
@@ -115,7 +115,7 @@ promote_canary(haproxy_pid, ratio_vaddr, 10000)  # 100.00% (Full Rollout)
 3. Linux kernel delivers `SIGSEGV`.
 4. Default action (`SIG_DFL`) terminates the process immediately, killing thousands of active TCP sessions and causing downtime.
 
-### 3.2 The MULTICS Fixup Engine: Step-by-Step
+### 3.2 The Fixup Engine: Step-by-Step
 
 ```
 [ Fault in Livepatch ] ──► [ Hardware Trap (#PF) ] ──► [ Linux Kernel delivers SIGSEGV ]
@@ -137,7 +137,7 @@ promote_canary(haproxy_pid, ratio_vaddr, 10000)  # 100.00% (Full Rollout)
                                                        │
                                                        ▼
                                           [ Resume Pristine V0 Code ]
-                                          [ 0 Crashes / 100% Uptime ]
+                                          [ 0 crashes in the test run ]
 ```
 
 1. **Alternate Stack Setup**:
@@ -225,19 +225,19 @@ We tested the canary safeguard on **HAProxy version 3.5-dev3** running with 4 co
 
 ## 5. Multi-Host VM Verification Matrix
 
-| Environment | OS / Kernel | Workload | 1% Canary Verification | MULTICS Crash Resilience | Overall Status |
+| Environment | OS / Kernel | Workload | 1% Canary Verification | Crash Recovery | Overall Status |
 | :--- | :--- | :--- | :---: | :---: | :---: |
-| **Local Host** | Fedora x86_64 | 14,500 reqs | 47 / 5,000 (0.94%) | 0 crashes / 3,000 reqs OK | **PASSED (100%)** |
-| **Debian 13 VM** | Linux 6.12.107, GCC 14.2 | 14,500 reqs | 42 / 5,000 (0.84%) | 0 crashes / 3,000 reqs OK | **PASSED (100%)** |
-| **Fedora 44 VM** | Linux 7.1.8-200, GCC 16.2 | 14,500 reqs | 56 / 5,000 (1.12%) | 0 crashes / 3,000 reqs OK | **PASSED (100%)** |
-| **HAProxy 3.5 VM** | Debian 13 (`/root/haproxy`) | 27,000 reqs | 225 / 20,000 (1.12%) | Revert & promotion verified | **PASSED (100%)** |
+| **Local Host** | Fedora x86_64 | 14,500 reqs | 47 / 5,000 (0.94%) | 0 crashes / 3,000 reqs OK | **Passed** |
+| **Debian 13 VM** | Linux 6.12.107, GCC 14.2 | 14,500 reqs | 42 / 5,000 (0.84%) | 0 crashes / 3,000 reqs OK | **Passed** |
+| **Fedora 44 VM** | Linux 7.1.8-200, GCC 16.2 | 14,500 reqs | 56 / 5,000 (1.12%) | 0 crashes / 3,000 reqs OK | **Passed** |
+| **HAProxy 3.5 VM** | Debian 13 (`/root/haproxy`) | 27,000 reqs | 225 / 20,000 (1.12%) | Revert & promotion verified | **Passed** |
 
 ---
 
 ## 6. Directory Reference
 
 * Benchmark suites:
-  * [`canary-resilience-bench/`](/canary-resilience-bench/): Edge server, MULTICS fault guard, and crash test harness.
+  * [`canary-resilience-bench/`](/canary-resilience-bench/): Edge server, fault guard, and crash test harness.
   * [`haproxy-canary-bench/`](/haproxy-canary-bench/): HAProxy 3.5 1% canary patch and 10,000 req/s live test harness.
 * Driver & Control:
   * [`ulp-driver/ulp_driver.c`](/ulp-driver/ulp_driver.c): Kernel text-poke and ioctl driver.
