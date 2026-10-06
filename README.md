@@ -23,6 +23,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 - **The post-quantum signing (`ulp_pqc_signer.py`) is a toy.** It is a Dilithium-style learning implementation, not FIPS 204 ML-DSA. It does not interoperate with real ML-DSA libraries and must not be used for anything security-relevant.
 - **`ulp_scope=1`** (same-UID access) checks matching credentials and refuses non-dumpable targets, but cannot apply Yama or LSM ptrace hooks (they are not exported to modules). Use the default root-only scope.
 - The driver is **x86_64 only**. The other-architecture work is limited to emulation tests.
+- **The driver currently builds only on Debian kernels.** It requires a kernel that exports `task_work_add`, which mainline Linux does not; Debian adds the export with a distribution patch. On Fedora and other mainline-based kernels the module fails to link.
 - Benchmarks and test results were run on a small number of personal test VMs.
 
 ---
