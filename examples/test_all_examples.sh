@@ -31,7 +31,7 @@ fi
 
 EXAMPLES=(
     "01_basic_c_service:Basic C Service Livepatching & Reversion"
-    "02_driver_resumption_zero_downtime:Driver Unload, State Resumption & Zero Downtime"
+    "02_driver_resumption_zero_downtime:Driver Unload, State Resumption"
     "03_rust_livepatch:Rust Application Livepatching & ABI Safety"
     "04_exec_rule_persistence:In-Kernel Persistent Execve Startup Rules"
 )
@@ -70,6 +70,6 @@ for R in "${RESULTS[@]}"; do
 done
 echo -e "${BOLD}${BLUE}--------------------------------------------------------------------------------${NC}"
 echo -e "  ${BOLD}Total Suites Executed:${NC} 4 / 4"
-echo -e "  ${BOLD}Overall Status:${NC}        ${GREEN}100% PASSED${NC}"
+echo -e "  ${BOLD}Overall Status:${NC}        ${GREEN}all passed${NC}"
 echo -e "  ${BOLD}Total Time Elapsed:${NC}    ${TOTAL_DURATION} seconds"
 echo -e "${BOLD}${BLUE}================================================================================${NC}"

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# ulp-driver: ULP Example 2 - Kernel Driver Resumption & Zero Downtime
+# ulp-driver: ULP Example 2 - Kernel Driver Resumption Across Module Reloads
 #
 # This example demonstrates ULP's unique driver upgrade and resumption lifecycle:
 # 1. Loading the ulp_driver kernel module with allow_resumption=1 and resume=1.
 # 2. Livepatching an active, concurrent worker daemon.
 # 3. UNLOADING the kernel driver (rmmod ulp_driver) — the driver serializes its
 #    active patch state into /run/ulp/state.bin without touching userspace memory.
-# 4. Proving 100% ZERO-DOWNTIME continuity: the userspace daemon continues to
+# 4. Checking continuity: the userspace daemon continues to
 #    execute patched code and serve queries while ulp_driver is NOT loaded!
 # 5. RELOADING the kernel driver (insmod ulp_driver.ko resume=1) — the driver
 #    deserializes state, re-verifies memory trampolines, and adopts all patches.
@@ -134,7 +134,7 @@ for i in $(seq 1 5); do
         exit 1
     fi
 done
-echo -e "${GREEN}[+] ZERO-DOWNTIME PROVEN: Userspace executed hotpatched code with ZERO kernel driver loaded!${NC}"
+echo -e "\n${GREEN}[+] Patched code kept running with no kernel driver loaded.${NC}"
 
 # Step 7: Reload driver and resume state
 echo -e "\n${CYAN}======================================================================${NC}"
