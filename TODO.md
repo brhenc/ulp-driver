@@ -38,6 +38,10 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
 
 - [ ] **Example scripts default to `/usr/local/bin/ulp_inject` / `ulp_ctl`.** Stale installed copies silently cause failures (the remote `dlopen` returns NULL and the target dies with SIGILL). Default to the tools in the repo's build directory.
 - [ ] **`ulp_inject` leaves the target in a bad state when the remote `dlopen` fails** (the process died with SIGILL after a failed injection). Restore registers and memory on every error path.
+- [ ] **Applying a patch requires hand-computed addresses.** `ulp_ctl apply` takes raw hex target and patch addresses. The examples derive them with `nm`, `/proc/<pid>/maps` and inline Python. Add symbol-based arguments, for example `ulp_ctl apply <pid> <binary>:<symbol> <patch.so>:<symbol>`, resolving PIE bases and checking patchability (see the analyzer item above).
+- [ ] **`ulp_scope=1` is effectively unusable without `dev_mode`.** Same-user patching still needs an armed window, and only root can arm (via `/dev/ulp` write, which requires `CAP_SYS_ADMIN`), so a root operator has to hold `ulp_ctl arm` open. Decide whether arming should be per-scope, delegable, or documented as root-mediated.
+- [ ] **Move the 18 root-level `test_*`/`run_*` scripts** into `tests/` (runnable anywhere) and `scripts/dev-vm/` (tied to the author's VMs: `run_all_tests.sh` and `run_full_reboot_test.sh` ssh to `debian-13`/`fkernel-dev`). Remove personal VM hostnames from the 8 docs that mention them.
+- [ ] **Re-run `examples/test_all_examples.sh` from a fresh clone** after the switch to in-repo tool defaults (this needs a host where the module isn't pinned at scope 3).
 - [ ] **Patch validation workflow:** build and test patches against a clone of the exact deployed binary, matched by build-id and library versions, ideally with replayed production traffic.
 - [ ] **Patch authoring tooling:** generate patches from a source diff against the deployed build (similar to `kpatch-build`).
 

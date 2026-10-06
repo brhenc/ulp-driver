@@ -50,13 +50,45 @@ See [`examples/README.md`](examples/README.md) for a guided walkthrough, [`docs/
 
 ---
 
-## Building the ULP Driver
+## Quick start
+
+### Requirements
+
+- **x86_64 Linux with a Debian kernel.** The driver needs a kernel that exports `task_work_add` (see [Status & limitations](#status--limitations)). Tested on Debian 13 (6.12).
+- **Headers for the running kernel**, gcc, make, the OpenSSL development package, and python3:
+  ```bash
+  apt install linux-headers-$(uname -r) build-essential libssl-dev python3
+  ```
+- **Root access**, on a disposable test machine or VM.
+- **Secure Boot disabled**, or the module signed with an enrolled key. Otherwise `insmod` fails with `Key was rejected by service`.
+
+### Build and load
 
 ```bash
-cd ulp-driver/
-make
-insmod ulp_driver.ko dev_mode=1
+make -C ulp-driver              # kernel module + ulp_ctl, ulp_inject, ulp_persist, libulp_preload.so
+sudo insmod ulp-driver/ulp_driver.ko dev_mode=1
+sudo make -C ulp-driver install # optional: tools to /usr/local, module to /lib/modules
 ```
+
+### Run the first example
+
+```bash
+sudo examples/01_basic_c_service/run_example.sh
+```
+
+It starts a small service, injects a patch payload, redirects one function to it, and reverts it. [`examples/README.md`](examples/README.md) describes all the examples.
+
+### `dev_mode` and the maintenance window
+
+By default the driver refuses to apply patches unless root has **armed a maintenance window**. `dev_mode=1` skips that check (and allows unloading the module and lowering `kernel.ulp_scope`), which is convenient for testing. Without `dev_mode`:
+
+```bash
+sudo ulp_ctl --arm=60 apply <pid> ...   # arm for this command only; relocks when ulp_ctl exits
+sudo ulp_ctl arm 120                    # hold a window open for other tools until timeout or Ctrl-C
+sudo ulp_ctl disarm
+```
+
+`kernel.ulp_scope` controls who may patch: 0 = disabled, 1 = same user, 2 = root only (default), 3 = root only and locked until reboot.
 
 ## Kernel Livepatching (KLP)
 

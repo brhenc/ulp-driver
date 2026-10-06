@@ -15,7 +15,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ULP_DRIVER_DIR="$REPO_DIR/ulp-driver"
-ULP_CTL="${ULP_CTL:-/usr/local/bin/ulp_ctl}"
+ULP_CTL="${ULP_CTL:-$ULP_DRIVER_DIR/ulp_ctl}"
+[ -x "$ULP_CTL" ] || { echo "Missing $ULP_CTL. Build the tools first: make -C $ULP_DRIVER_DIR" >&2; exit 1; }
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'

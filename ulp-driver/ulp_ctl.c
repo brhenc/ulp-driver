@@ -5,18 +5,68 @@
 #include <sys/ioctl.h>
 #include <string.h>
 #include <stdint.h>
+#include <errno.h>
+#include <signal.h>
 #include "ulp_uapi.h"
 
 static void print_usage(const char *prog)
 {
-    fprintf(stderr, "Usage:\n");
-    fprintf(stderr, "  %s list\n", prog);
-    fprintf(stderr, "  %s apply <pid> <patch_name> <func_name> <target_hex_vaddr> <patch_hex_vaddr> [func_len] [futex_hex_vaddr]\n", prog);
-    fprintf(stderr, "  %s revert <pid> <target_hex_vaddr>\n", prog);
+    fprintf(stderr, "Usage: %s [--arm[=TTL]] <command> [args]\n\n", prog);
+    fprintf(stderr, "Commands:\n");
+    fprintf(stderr, "  list\n");
+    fprintf(stderr, "  apply <pid> <patch_name> <func_name> <target_hex_vaddr> <patch_hex_vaddr> [func_len] [futex_hex_vaddr]\n");
+    fprintf(stderr, "  revert <pid> <target_hex_vaddr>\n");
+    fprintf(stderr, "  add-rule <bin_path> <patch_name> <func_name> <target_offset_hex> <patch_vaddr_hex> [func_len] [match_uid] [global_scope]\n");
+    fprintf(stderr, "  del-rule <bin_path> <target_offset_hex>\n");
+    fprintf(stderr, "  list-rules\n");
+    fprintf(stderr, "  set-override <bin_path> [ttl_seconds]\n");
+    fprintf(stderr, "  clear-override\n");
+    fprintf(stderr, "  arm [TTL]      open a maintenance window and hold it until TTL expires or Ctrl-C\n");
+    fprintf(stderr, "  disarm         close any maintenance window\n\n");
+    fprintf(stderr, "Unless the driver is loaded with dev_mode=1, applying a patch requires an armed\n");
+    fprintf(stderr, "maintenance window (root only). --arm arms one for this invocation; the driver\n");
+    fprintf(stderr, "relocks automatically when ulp_ctl exits. TTL defaults to 60s (max 300s).\n");
+}
+
+/* Arm or disarm the maintenance window. Arming is bound to this fd: closing it relocks the driver. */
+static int send_arm_cmd(int fd, uint32_t cmd_type, uint32_t ttl)
+{
+    struct ulp_cmd_v1 cmd;
+
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.size = sizeof(cmd);
+    cmd.cmd_type = cmd_type;
+    cmd.ttl_seconds = ttl;
+    if (write(fd, &cmd, sizeof(cmd)) < 0) {
+        perror(cmd_type == ULP_CMD_ARM ? "Failed to arm /dev/ulp" : "Failed to disarm /dev/ulp");
+        return -1;
+    }
+    return 0;
+}
+
+static volatile sig_atomic_t g_stop;
+
+static void on_signal(int sig)
+{
+    (void)sig;
+    g_stop = 1;
 }
 
 int main(int argc, char **argv)
 {
+    const char *prog = argv[0];
+    int arm = 0;
+    uint32_t arm_ttl = 0;
+
+    if (argc > 1 && strncmp(argv[1], "--arm", 5) == 0 && (argv[1][5] == '\0' || argv[1][5] == '=')) {
+        arm = 1;
+        if (argv[1][5] == '=')
+            arm_ttl = (uint32_t)strtoul(argv[1] + 6, NULL, 0);
+        argv++;
+        argc--;
+    }
+    argv[0] = (char *)prog;
+
     if (argc < 2) {
         print_usage(argv[0]);
         return 1;
@@ -26,6 +76,11 @@ int main(int argc, char **argv)
     int fd = open("/dev/ulp", O_RDWR);
     if (fd < 0) {
         perror("Failed to open /dev/ulp");
+        return 1;
+    }
+
+    if (arm && send_arm_cmd(fd, ULP_CMD_ARM, arm_ttl) < 0) {
+        close(fd);
         return 1;
     }
 
@@ -81,7 +136,10 @@ int main(int argc, char **argv)
         }
 
         if (ioctl(fd, ULP_IOC_APPLY_PATCH, &req) < 0) {
+            int err = errno;
             perror("ioctl(ULP_IOC_APPLY_PATCH) failed");
+            if (err == EPERM && !arm)
+                fprintf(stderr, "Hint: the driver may be locked. Rerun as root with --arm, or load the driver with dev_mode=1 for testing (see dmesg).\n");
             close(fd);
             return 1;
         }
@@ -225,6 +283,30 @@ int main(int argc, char **argv)
             return 1;
         }
         printf("[ulp_ctl] SUCCESS: Emergency kernel override cleared. Livepatching active.\n");
+    } else if (strcmp(action, "arm") == 0) {
+        uint32_t ttl = (argc > 2) ? (uint32_t)strtoul(argv[2], NULL, 0) : 60;
+
+        if (ttl > 300)
+            ttl = 300;
+        if (send_arm_cmd(fd, ULP_CMD_ARM, ttl) < 0) {
+            close(fd);
+            return 1;
+        }
+        signal(SIGINT, on_signal);
+        signal(SIGTERM, on_signal);
+        signal(SIGALRM, on_signal);
+        alarm(ttl);
+        printf("[ulp_ctl] Driver ARMED for %u s. Press Ctrl-C to disarm early.\n", ttl);
+        fflush(stdout);
+        while (!g_stop)
+            pause();
+        printf("[ulp_ctl] Maintenance window closed; driver locked.\n");
+    } else if (strcmp(action, "disarm") == 0) {
+        if (send_arm_cmd(fd, ULP_CMD_DISARM, 0) < 0) {
+            close(fd);
+            return 1;
+        }
+        printf("[ulp_ctl] Driver disarmed and locked.\n");
     } else {
         print_usage(argv[0]);
         close(fd);
