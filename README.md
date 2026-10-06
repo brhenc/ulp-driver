@@ -20,7 +20,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 
 - **Patch application is best-effort, not atomic.** The driver writes trampolines with `access_process_vm()` without stopping the target's threads. The quiescence check (no thread executing in the patched range) inspects saved register state and is racy for threads running at the time. A thread can occasionally execute a partially written trampoline.
 - **Signatures are not enforced** on the injection path (see above).
-- **The post-quantum signing (`tools/ulp_pqc_signer.py`) is a toy.** It is a Dilithium-style learning implementation, not FIPS 204 ML-DSA. It does not interoperate with real ML-DSA libraries and must not be used for anything security-relevant.
+- **No post-quantum signing yet.** An earlier experimental implementation was removed; a real one (liboqs or OpenSSL 3.5 ML-DSA) is on the TODO list.
 - **`ulp_scope=1`** (same-UID access) checks matching credentials and refuses non-dumpable targets, but cannot apply Yama or LSM ptrace hooks (they are not exported to modules). Use the default root-only scope.
 - The driver is **x86_64 only**. The other-architecture work is limited to emulation tests.
 - **The driver currently builds only on Debian kernels.** It requires a kernel that exports `task_work_add`, which mainline Linux does not; Debian adds the export with a distribution patch. On Fedora and other mainline-based kernels the module fails to link.
@@ -44,7 +44,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 ├── rust-livepatch-plugin/ # LLVM plugin for livepatchable Rust codegen
 ├── tests/                 # Integration test suites (run as root on a test VM)
 ├── scripts/dev-vm/        # Author's VM orchestration scripts (ssh/scp to named test VMs)
-├── tools/                 # ulp_tui.py, ulp_crypto_verifier.py, ulp_pqc_signer.py
+├── tools/                 # ulp_tui.py, ulp_crypto_verifier.py
 ├── patches/               # Upstream patches (rustc -Z patchable-function-entry)
 ├── telemetry/             # Prometheus exporter
 └── vm-provisioning/       # Test VM provisioning script

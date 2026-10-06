@@ -18,7 +18,6 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 | [**`07_LKML_SUBMISSION_PLAYBOOK.md`**](/docs/hacking/07_LKML_SUBMISSION_PLAYBOOK.md) | **LKML Upstream Submission Playbook** | `CONFIG_USERSPACE_LIVEPATCH`, reviewer pushback answers (Peter Zijlstra, Josh Poimboeuf), `checkpatch.pl`, patch submission. |
 | [**`08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md`**](/docs/hacking/08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md) | **Development & Test Automation** | Debian 13 VM (`192.168.122.171`), building `ulp_driver.ko`, running all automated benchmarks, writing new livepatches. |
 | [**`09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`**](/docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md) | **Canary Routing & Fault Recovery** | 1% canary traffic sampling, trampoline passthrough, SIGSEGV trapping in patched code, and auto-rollback (experimental). |
-| [**`10_POST_QUANTUM_CRYPTO_AND_SIGNING.md`**](/docs/hacking/10_POST_QUANTUM_CRYPTO_AND_SIGNING.md) | **Post-Quantum Crypto (PQC) & Hybrid Attestation** | NIST FIPS 204 ML-DSA-65 (CRYSTALS-Dilithium), Linux in-kernel PQC feasibility (SHAKE-256), Cosign PQC roadmap, Hybrid signing envelopes. |
 
 ---
 
@@ -40,8 +39,6 @@ python3 cross-arch-bench/run_cross_arch_emulation_suite.py
 # 5. Canary Traffic Splitting & Crash Resilience Suite
 python3 test_canary_resilience_suite.py
 
-# 6. Post-Quantum & Hybrid Signature Verification Suite
-python3 tests/test_pqc_verification_suite.py
 
 # 7. Operator Terminal UI Dashboard
 python3 tools/ulp_tui.py

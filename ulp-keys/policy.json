@@ -8,24 +8,11 @@
     "livepatch": {
       "/usr/local/sbin/haproxy": [
         {
-          "type": "hybridSigned",
-          "pqcKeyPath": "/etc/ulp/keys/haproxy-mldsa65.pub",
-          "classicalKeyPath": "/etc/ulp/keys/haproxy-cosign.pub"
-        },
-        {
-          "type": "pqcSigned",
-          "keyPath": "/etc/ulp/keys/haproxy-mldsa65.pub"
-        },
-        {
           "type": "sigstoreSigned",
           "keyPath": "/etc/ulp/keys/haproxy-cosign.pub"
         }
       ],
       "/usr/sbin/mariadbd": [
-        {
-          "type": "pqcSigned",
-          "keyPath": "/etc/ulp/keys/mariadb-mldsa65.pub"
-        },
         {
           "type": "signedBy",
           "keyType": "GPGKeys",
@@ -33,11 +20,6 @@
         }
       ],
       "/usr/lib/postgresql/17/bin/postgres": [
-        {
-          "type": "hybridSigned",
-          "pqcKeyPath": "/etc/ulp/keys/postgres-mldsa65.pub",
-          "classicalKeyPath": "/etc/ulp/keys/postgres-cosign.pub"
-        },
         {
           "type": "sigstoreSigned",
           "keyPath": "/etc/ulp/keys/postgres-cosign.pub"
