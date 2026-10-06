@@ -1,12 +1,12 @@
 # Operator Tooling, TUI Dashboard & Continuous Automation
 
 **Module:** Operator Tools & Interfaces  
-**Paths:** `ulp_tui.py`, `ulp_crypto_verifier.py`, `tests/test_multi_version_continuous_suite.py`  
+**Paths:** `tools/ulp_tui.py`, `tools/ulp_crypto_verifier.py`, `tests/test_multi_version_continuous_suite.py`  
 **Path:** `docs/hacking/06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md`  
 
 ---
 
-## 1. The ULP Operator Terminal UI (`ulp_tui.py`)
+## 1. The ULP Operator Terminal UI (`tools/ulp_tui.py`)
 
 The Terminal UI is a curses dashboard that connects directly to `/dev/ulp` via the Plan 9 VFS protocol:
 
@@ -46,7 +46,7 @@ The Terminal UI is a curses dashboard that connects directly to `/dev/ulp` via t
 ### 1.1 Running the TUI
 ```bash
 # Must be executed as root on host or VM
-python3 ulp_tui.py
+python3 tools/ulp_tui.py
 ```
 
 ### 1.2 Target Auto-Detection & Process Resolution
@@ -59,7 +59,7 @@ The TUI automatically monitors process tables:
 
 ---
 
-## 2. Cryptographic Patch Verification (`ulp_crypto_verifier.py`)
+## 2. Cryptographic Patch Verification (`tools/ulp_crypto_verifier.py`)
 
 Before any livepatch is submitted to `/dev/ulp`, the operator tooling verifies cryptographic authenticity:
 
@@ -73,7 +73,7 @@ Patch Binary / DSO (.so / .bin)
 
 ### 2.1 Verification CLI Usage:
 ```bash
-python3 ulp_crypto_verifier.py verify \
+python3 tools/ulp_crypto_verifier.py verify \
     --patch /root/ulp-driver/haproxy-multi-patch/patch_sample.so \
     --cosign-key /root/ulp-driver/ulp-keys/haproxy-cosign.pub
 ```

@@ -435,7 +435,7 @@ ulp-driver natively verifies two independent cryptographic standards:
 1. *Sigstore / Cosign (ECDSA-P256)*: Modern cloud-native blob signing. Verifies public key signatures without requiring an external certificate transparency log in offline/air-gapped environments (`--insecure-ignore-tlog=true`).
 2. *GPG (OpenPGP RSA-3072)*: Traditional enterprise detached signatures (`.sig`). Verifies against isolated, dedicated keyrings.
 
-If a single byte of a patch payload is altered, or if a patch is signed by an unauthorized key, `ulp_crypto_verifier.py` rejects it with an audit alert *before the kernel is ever commanded to arm*.
+If a single byte of a patch payload is altered, or if a patch is signed by an unauthorized key, `tools/ulp_crypto_verifier.py` rejects it with an audit alert *before the kernel is ever commanded to arm*.
 
 = Practical Walkthrough: Patching a Real Function
 
@@ -476,7 +476,7 @@ cosign sign-blob --key /etc/ulp/keys/haproxy-cosign.key \
 Launch `sudo ulp-tui`:
 1. Use `Up`/`Down` arrows to highlight `HAProxy`.
 2. Press `A` to open a 30-second maintenance arming window.
-3. Press `P`. The TUI automatically invokes `ulp_crypto_verifier.py`, verifies the Cosign signature against `/etc/ulp/policy.json`, formats `struct ulp_cmd_v1`, writes it to `/dev/ulp`, and disarms the driver.
+3. Press `P`. The TUI automatically invokes `tools/ulp_crypto_verifier.py`, verifies the Cosign signature against `/etc/ulp/policy.json`, formats `struct ulp_cmd_v1`, writes it to `/dev/ulp`, and disarms the driver.
 4. HAProxy's health check is immediately updated across all running worker threads. Zero connections are dropped.
 
 = Summary Glossary & Key Formulas

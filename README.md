@@ -11,7 +11,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 1. **ULP kernel driver** (`ulp-driver/`): a kernel module (x86_64) plus userspace tools (`ulp_ctl`, `ulp_inject`, `libulp_preload`). It writes function-entry trampolines into a target process, tracks applied patches, carries patches across `fork`/`exec`, and can hand its state over across module reloads.
 2. **Injector** (`ulp_inject`): attaches with ptrace and loads a patch payload into the target, via `dlopen` for dynamic binaries or a remote `mmap` for static ones.
 3. **Experiments**: multi-generation patching of one process, canary-style rollout (patching a fraction of requests), and trampoline encodings for other architectures tested under QEMU user-mode emulation.
-4. **Signature tooling** (optional): `ulp_crypto_verifier.py` checks patch payloads against a `policy.json` trust policy (cosign / GPG). It is a standalone pre-flight check and is not enforced by the driver or the injector.
+4. **Signature tooling** (optional): `tools/ulp_crypto_verifier.py` checks patch payloads against a `policy.json` trust policy (cosign / GPG). It is a standalone pre-flight check and is not enforced by the driver or the injector.
 5. **KLP samples** (`kernel-livepatch/`): small kernel livepatch modules.
 
 ---
@@ -20,7 +20,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 
 - **Patch application is best-effort, not atomic.** The driver writes trampolines with `access_process_vm()` without stopping the target's threads. The quiescence check (no thread executing in the patched range) inspects saved register state and is racy for threads running at the time. A thread can occasionally execute a partially written trampoline.
 - **Signatures are not enforced** on the injection path (see above).
-- **The post-quantum signing (`ulp_pqc_signer.py`) is a toy.** It is a Dilithium-style learning implementation, not FIPS 204 ML-DSA. It does not interoperate with real ML-DSA libraries and must not be used for anything security-relevant.
+- **The post-quantum signing (`tools/ulp_pqc_signer.py`) is a toy.** It is a Dilithium-style learning implementation, not FIPS 204 ML-DSA. It does not interoperate with real ML-DSA libraries and must not be used for anything security-relevant.
 - **`ulp_scope=1`** (same-UID access) checks matching credentials and refuses non-dumpable targets, but cannot apply Yama or LSM ptrace hooks (they are not exported to modules). Use the default root-only scope.
 - The driver is **x86_64 only**. The other-architecture work is limited to emulation tests.
 - **The driver currently builds only on Debian kernels.** It requires a kernel that exports `task_work_add`, which mainline Linux does not; Debian adds the export with a distribution patch. On Fedora and other mainline-based kernels the module fails to link.
@@ -37,13 +37,15 @@ The project was prototyped with AI to test whether the approach is feasible befo
 ├── examples/              # Runnable end-to-end examples (C, Rust, driver reload)
 ├── docs/                  # Operator guide, hacking guides (docs/hacking/), design notes, writeups
 ├── signed-patches/        # Sample patch payloads with detached signatures (test keys)
-├── ulp-keys/              # Public verification keys used by policy.json
+├── ulp-keys/              # Public verification keys used by ulp-keys/policy.json
 ├── *-livepatch-bench/     # Livepatch benchmarks against HAProxy, PostgreSQL, MariaDB, Go, Rust
 ├── *-canary-bench/        # Canary-rollout and fault-handling experiments
 ├── cross-arch-bench/      # Trampoline encodings for other architectures (QEMU user-mode)
 ├── rust-livepatch-plugin/ # LLVM plugin for livepatchable Rust codegen
 ├── tests/                 # Integration test suites (run as root on a test VM)
 ├── scripts/dev-vm/        # Author's VM orchestration scripts (ssh/scp to named test VMs)
+├── tools/                 # ulp_tui.py, ulp_crypto_verifier.py, ulp_pqc_signer.py
+├── patches/               # Upstream patches (rustc -Z patchable-function-entry)
 ├── telemetry/             # Prometheus exporter
 └── vm-provisioning/       # Test VM provisioning script
 ```
@@ -120,7 +122,7 @@ rmmod livepatch_uname
 
 ## Signing Keys
 
-Only **public** test keys are committed. Private signing keys are never stored in this repository; generate your own with `cosign generate-key-pair` or `gpg --gen-key` and point `policy.json` at the corresponding public keys.
+Only **public** test keys are committed. Private signing keys are never stored in this repository; generate your own with `cosign generate-key-pair` or `gpg --gen-key` and point `ulp-keys/policy.json` at the corresponding public keys.
 
 > **Warning:** This code loads a kernel module and modifies running processes. Use it only on disposable test machines.
 
@@ -133,7 +135,7 @@ ulp-driver is licensed under the **GNU General Public License v2.0 only** (`GPL-
 | Path | License |
 |---|---|
 | `ulp-driver/ulp_uapi.h` | `GPL-2.0-only WITH Linux-syscall-note` (userspace programs may include it without becoming GPL, as with kernel uapi headers) |
-| `upstream.patch` | `MIT OR Apache-2.0` (matching the Rust compiler, for upstream submission) |
+| `patches/rustc-patchable-function-entry.patch` | `MIT OR Apache-2.0` (matching the Rust compiler, for upstream submission) |
 | `rust-livepatch-plugin/` | `Apache-2.0 WITH LLVM-exception` (matching LLVM) |
 
 Full license and exception texts are in [`LICENSES/`](LICENSES/).

@@ -111,30 +111,30 @@ $$\text{Valid}(\text{Payload}) \iff \text{Valid}_{\text{Classical}}(\text{Payloa
 ## 5. Implementation Reference & CLI Tooling
 
 ### 5.1 Tool Overview
-* [`ulp_pqc_signer.py`](/ulp_pqc_signer.py): Generates ML-DSA-65 keypairs and outputs pure PQC and Hybrid envelopes.
-* [`ulp_crypto_verifier.py`](/ulp_crypto_verifier.py): Policy verification engine supporting `pqcSigned`, `hybridSigned`, `sigstoreSigned`, and `signedBy`.
+* [`tools/ulp_pqc_signer.py`](/ulp_pqc_signer.py): Generates ML-DSA-65 keypairs and outputs pure PQC and Hybrid envelopes.
+* [`tools/ulp_crypto_verifier.py`](/ulp_crypto_verifier.py): Policy verification engine supporting `pqcSigned`, `hybridSigned`, `sigstoreSigned`, and `signedBy`.
 * [`tests/test_pqc_verification_suite.py`](/tests/test_pqc_verification_suite.py): 6-phase test suite validating tamper resistance and fail-closed security.
 
 ### 5.2 Generating Keys & Signing Livepatches
 
 ```bash
 # 1. Generate ML-DSA-65 Post-Quantum Keypair
-python3 ulp_pqc_signer.py genkey haproxy /etc/ulp/keys
+python3 tools/ulp_pqc_signer.py genkey haproxy /etc/ulp/keys
 
 # 2. Sign with Pure Post-Quantum ML-DSA-65
-python3 ulp_pqc_signer.py sign patch_haproxy.so /etc/ulp/keys/haproxy-mldsa65.key patch_haproxy.so.pqc.sig
+python3 tools/ulp_pqc_signer.py sign patch_haproxy.so /etc/ulp/keys/haproxy-mldsa65.key patch_haproxy.so.pqc.sig
 
 # 3. Sign with Classical Cosign (ECDSA-P256)
 cosign sign-blob --key /etc/ulp/keys/haproxy-cosign.key --tlog-upload=false --yes patch_haproxy.so --output-signature patch_haproxy.so.cosign.sig
 
 # 4. Generate Hybrid Dual-Layer Attestation Envelope
-python3 ulp_pqc_signer.py sign-hybrid patch_haproxy.so \
+python3 tools/ulp_pqc_signer.py sign-hybrid patch_haproxy.so \
     /etc/ulp/keys/haproxy-mldsa65.key \
     patch_haproxy.so.cosign.sig \
     patch_haproxy.so.hybrid.sig
 ```
 
-### 5.3 Configuring `policy.json`
+### 5.3 Configuring `ulp-keys/policy.json`
 
 ```json
 {

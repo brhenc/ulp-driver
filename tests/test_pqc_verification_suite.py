@@ -14,8 +14,8 @@ Tests:
 import os as _os
 import sys as _sys
 REPO_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-if REPO_DIR not in _sys.path:
-    _sys.path.insert(0, REPO_DIR)
+if _os.path.join(REPO_DIR, "tools") not in _sys.path:
+    _sys.path.insert(0, _os.path.join(REPO_DIR, "tools"))
 import os
 import sys
 import json
@@ -153,17 +153,17 @@ def run_tests():
         # TEST 6: Production Targets Verification (HAProxy, MariaDB, Postgres)
         # -------------------------------------------------------------
         print("\n>>> TEST 6: Production System Targets Verification")
-        ulp_crypto_verifier.POLICY_PATH = os.path.abspath("policy.json")
+        ulp_crypto_verifier.POLICY_PATH = os.path.join(REPO_DIR, "ulp-keys", "policy.json")
 
-        ok1, r1, _ = ulp_crypto_verifier.verify_patch("/usr/local/sbin/haproxy", "signed-patches/haproxy_patch.c")
+        ok1, r1, _ = ulp_crypto_verifier.verify_patch("/usr/local/sbin/haproxy", REPO_DIR + "/signed-patches/haproxy_patch.c")
         print(f"[HAProxy]    ok={ok1}, reason='{r1}'")
         assert ok1 is True
 
-        ok2, r2, _ = ulp_crypto_verifier.verify_patch("/usr/sbin/mariadbd", "signed-patches/mariadb_patch.c")
+        ok2, r2, _ = ulp_crypto_verifier.verify_patch("/usr/sbin/mariadbd", REPO_DIR + "/signed-patches/mariadb_patch.c")
         print(f"[MariaDB]    ok={ok2}, reason='{r2}'")
         assert ok2 is True
 
-        ok3, r3, _ = ulp_crypto_verifier.verify_patch("/usr/lib/postgresql/17/bin/postgres", "signed-patches/postgres_patch.c")
+        ok3, r3, _ = ulp_crypto_verifier.verify_patch("/usr/lib/postgresql/17/bin/postgres", REPO_DIR + "/signed-patches/postgres_patch.c")
         print(f"[PostgreSQL] ok={ok3}, reason='{r3}'")
         assert ok3 is True
         print("[PASSED] All Production Targets Verified Under PQC and Hybrid Policies!")

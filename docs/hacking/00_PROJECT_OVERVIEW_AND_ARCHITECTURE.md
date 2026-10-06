@@ -40,7 +40,7 @@ The ULP stack spans four distinct execution tiers:
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Tier 4: Operator & Automation Layer                                    │
-│ ├── Curses Terminal UI: ulp_tui.py / ulp-tui.py                        │
+│ ├── Curses Terminal UI: tools/ulp_tui.py / ulp-tui.py                        │
 │ ├── Command-Line Tools: ulp_ctl, go_sym_resolver.py                    │
 │ └── Cryptographic Trust: Cosign (ECDSA-P256) & GPG (RSA-3072) / Rekor   │
 ├────────────────────────────────────────────────────────────────────────┤
@@ -99,9 +99,9 @@ ulp-driver/
 ├── haproxy-multi-patch/                   # HAProxy 3.0 multi-commit livepatch modules
 ├── cross-arch-bench/                      # 6-Architecture QEMU Emulation Verification Suite
 │   └── run_cross_arch_emulation_suite.py  # Automated compiler & emulator runner
-├── ulp_tui.py / ulp-tui.py                # Full-featured Curses Operator Terminal UI
+├── tools/ulp_tui.py / ulp-tui.py                # Full-featured Curses Operator Terminal UI
 ├── tests/test_multi_version_continuous_suite.py # End-to-end continuous validation suite
-└── ulp_crypto_verifier.py                 # Cosign & GPG cryptographic verification tool
+└── tools/ulp_crypto_verifier.py                 # Cosign & GPG cryptographic verification tool
 ```
 
 ---

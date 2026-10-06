@@ -149,5 +149,5 @@ A multi-mode sysctl ratchet governs global driver permissions:
 ## 6. Plan 9 VFS Command & Telemetry Protocol
 
 In addition to standard `ioctl()`, `/dev/ulp` implements a high-performance **Mode 0600 VFS Protocol**:
-* **`read(fd, &event, sizeof(struct ulp_event))`**: Streams live telemetry ring buffer events (patch applied, reverted, armed, disarmed, errors) to userspace watchers (such as `ulp_tui.py`).
+* **`read(fd, &event, sizeof(struct ulp_event))`**: Streams live telemetry ring buffer events (patch applied, reverted, armed, disarmed, errors) to userspace watchers (such as `tools/ulp_tui.py`).
 * **`write(fd, &cmd, sizeof(struct ulp_cmd_payload))`**: Directly dispatches binary command payloads for zero-dependency scripting.

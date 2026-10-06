@@ -24,9 +24,9 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
 
 ## Security
 
-- [ ] **Signatures are not enforced on the injection path.** Neither `ulp_driver.c` nor `ulp_inject.c` verifies payload signatures; `ulp_crypto_verifier.py` is a standalone pre-flight tool.
+- [ ] **Signatures are not enforced on the injection path.** Neither `ulp_driver.c` nor `ulp_inject.c` verifies payload signatures; `tools/ulp_crypto_verifier.py` is a standalone pre-flight tool.
 - [ ] **`ulp_scope=1` cannot apply Yama or LSM ptrace hooks** (`ptrace_may_access()` is not exported). It currently checks matching credentials and dumpability only.
-- [ ] **The PQC signer (`ulp_pqc_signer.py`) is a toy, not FIPS 204 ML-DSA:**
+- [ ] **The PQC signer (`tools/ulp_pqc_signer.py`) is a toy, not FIPS 204 ML-DSA:**
   - `expand_a` lacks rejection sampling
   - the secret polynomials don't come from the seed
   - it uses JSON encoding instead of the FIPS format
@@ -46,6 +46,7 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
 - [ ] **`ulp_scope=1` is effectively unusable without `dev_mode`.** Same-user patching still needs an armed window, and only root can arm (via `/dev/ulp` write, which requires `CAP_SYS_ADMIN`), so a root operator has to hold `ulp_ctl arm` open. Decide whether arming should be per-scope, delegable, or documented as root-mediated.
 - [x] Moved the root-level `test_*`/`run_*` scripts into `tests/` and `scripts/dev-vm/` (the latter tied to the author's VMs `debian-13`/`fkernel-dev`).
 - [ ] **Remove personal VM hostnames from the docs** that mention them, and make `scripts/dev-vm/` take the host as an argument.
+- [ ] **`tests/test_pqc_verification_suite.py` is broken:** it imports `sign_pqc_payload` / `sign_hybrid_payload`, but the signer defines `sign_patch_pqc` / `sign_patch_hybrid`.
 - [ ] **Re-run `examples/test_all_examples.sh` from a fresh clone** after the switch to in-repo tool defaults (this needs a host where the module isn't pinned at scope 3).
 - [ ] **Patch validation workflow:** build and test patches against a clone of the exact deployed binary, matched by build-id and library versions, ideally with replayed production traffic.
 - [ ] **Patch authoring tooling:** generate patches from a source diff against the deployed build (similar to `kpatch-build`).
@@ -53,7 +54,7 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
 ## Direction
 
 - [ ] **ptrace-only "break-glass" mode** for unprepared systems where the kernel module can't be loaded (Secure Boot module signing, lockdown, kernels without `task_work_add`). The driver stays the optional layer for managed fleets (persistence, policy, driver reloads).
-- [ ] Prefer patch sites reserved by `-fpatchable-function-entry` (see `upstream.patch` for rustc) when available. Fall back to overwriting live instructions for unprepared binaries.
+- [ ] Prefer patch sites reserved by `-fpatchable-function-entry` (see `patches/rustc-patchable-function-entry.patch` for rustc) when available. Fall back to overwriting live instructions for unprepared binaries.
 
 ## Docs
 

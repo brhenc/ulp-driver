@@ -12,14 +12,14 @@ Tests:
 import os as _os
 import sys as _sys
 REPO_DIR = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-if REPO_DIR not in _sys.path:
-    _sys.path.insert(0, REPO_DIR)
+if _os.path.join(REPO_DIR, "tools") not in _sys.path:
+    _sys.path.insert(0, _os.path.join(REPO_DIR, "tools"))
 import sys
 import os
 import subprocess
 import time
 
-sys.path.insert(0, REPO_DIR)
+sys.path.insert(0, os.path.join(REPO_DIR, "tools"))
 import ulp_tui
 
 # Ensure pgrust daemon is running in background for testing

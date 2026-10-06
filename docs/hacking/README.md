@@ -14,7 +14,7 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 | [**`03_MULTI_LANGUAGE_SUPPORT_GUIDE.md`**](/docs/hacking/03_MULTI_LANGUAGE_SUPPORT_GUIDE.md) | **C, C++, Rust & Golang Guide** | Itanium C++ mangling/vtables, Rust memory immutability, Go `ABIInternal` register models & pinned `g` register. |
 | [**`04_CROSS_ARCHITECTURE_PORTING_GUIDE.md`**](/docs/hacking/04_CROSS_ARCHITECTURE_PORTING_GUIDE.md) | **6-ISA Cross-Architecture Porting** | `x86_64`, `aarch64`, `riscv64`, `s390x`, `ppc64le`, `loongarch64`, weak memory models, cache flush instructions. |
 | [**`05_ADVANCED_DATABASE_PATTERNS_AND_SOCKETS.md`**](/docs/hacking/05_ADVANCED_DATABASE_PATTERNS_AND_SOCKETS.md) | **Database Patterns & Socket Backlogs** | 32-bit $\to$ 64-bit autoinc expansion, dynamic `max_connections`, zero-downtime socket backlog expansion (`ss -tlpn` $80 \to 300$). |
-| [**`06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md`**](/docs/hacking/06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md) | **Operator Dashboard & Tooling** | Curses TUI (`ulp_tui.py`), Plan 9 VFS telemetry, Cosign/GPG verification, continuous multi-generation suite. |
+| [**`06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md`**](/docs/hacking/06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md) | **Operator Dashboard & Tooling** | Curses TUI (`tools/ulp_tui.py`), Plan 9 VFS telemetry, Cosign/GPG verification, continuous multi-generation suite. |
 | [**`07_LKML_SUBMISSION_PLAYBOOK.md`**](/docs/hacking/07_LKML_SUBMISSION_PLAYBOOK.md) | **LKML Upstream Submission Playbook** | `CONFIG_USERSPACE_LIVEPATCH`, reviewer pushback answers (Peter Zijlstra, Josh Poimboeuf), `checkpatch.pl`, patch submission. |
 | [**`08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md`**](/docs/hacking/08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md) | **Development & Test Automation** | Debian 13 VM (`192.168.122.171`), building `ulp_driver.ko`, running all automated benchmarks, writing new livepatches. |
 | [**`09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`**](/docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md) | **Canary Routing & MULTICS Fault Recovery** | Progressive 1% canary traffic sampling, Tramp-Backup passthrough, zero-crash SEGV fault trapping, and kernel auto-rollback. |
@@ -44,5 +44,5 @@ python3 test_canary_resilience_suite.py
 python3 tests/test_pqc_verification_suite.py
 
 # 7. Operator Terminal UI Dashboard
-python3 ulp_tui.py
+python3 tools/ulp_tui.py
 ```

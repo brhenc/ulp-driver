@@ -19,7 +19,7 @@ from ulp_pqc_signer import MLDSA65
 
 POLICY_PATH = "/etc/ulp/policy.json"
 if not os.path.exists(POLICY_PATH):
-    POLICY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy.json")
+    POLICY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ulp-keys", "policy.json")
 
 def load_policy(policy_file=None):
     if policy_file is None:
@@ -176,7 +176,7 @@ def verify_patch(binary_target, payload_path, sig_path=None):
 
         # Adjust local path if needed for testing
         if key_path and not os.path.exists(key_path):
-            local_key = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ulp-keys", os.path.basename(key_path))
+            local_key = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ulp-keys", os.path.basename(key_path))
             if os.path.exists(local_key):
                 key_path = local_key
 
@@ -191,9 +191,9 @@ def verify_patch(binary_target, payload_path, sig_path=None):
             pqc_key = req.get("pqcKeyPath")
             classical_key = req.get("classicalKeyPath")
             if pqc_key and not os.path.exists(pqc_key):
-                pqc_key = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ulp-keys", os.path.basename(pqc_key))
+                pqc_key = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ulp-keys", os.path.basename(pqc_key))
             if classical_key and not os.path.exists(classical_key):
-                classical_key = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ulp-keys", os.path.basename(classical_key))
+                classical_key = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ulp-keys", os.path.basename(classical_key))
 
             auto_sig = sig_path or f"{payload_path}.hybrid.sig"
             ok, msg = verify_hybrid(payload_path, auto_sig, pqc_key, classical_key)

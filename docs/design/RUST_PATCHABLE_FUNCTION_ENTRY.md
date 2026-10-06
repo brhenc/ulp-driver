@@ -1,4 +1,4 @@
-# RUST-COMPILER-TO-BE-FIXED.md
+# docs/design/RUST_PATCHABLE_FUNCTION_ENTRY.md
 ## Architectural Specification: Natively Livepatchable Rust (`rustc` Livepatch Profile)
 
 **Author:** ulp-driver Architecture Team  

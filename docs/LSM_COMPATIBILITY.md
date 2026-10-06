@@ -1,7 +1,7 @@
 # Linux Security Module (LSM) Compatibility & Architecture Guide
 
 **ulp-driver: Userspace Livepatching (ULP) Security Framework**  
-**Document**: `lsm-compact.md`  
+**Document**: `docs/LSM_COMPATIBILITY.md`  
 **Status**: Production Specification  
 **Kernel Target**: Linux 6.x / 7.x (Debian 13, RHEL 9/10, Fedora, Ubuntu)
 
