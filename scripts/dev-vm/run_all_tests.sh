@@ -1,45 +1,52 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# ulp-driver: Unified End-to-End Regression Test Runner
-# Tests Debian 13 and Fedora Rawhide VMs with comprehensive assertions
-# ==============================================================================
+# ulp-driver: copy the driver to one or more test VMs, build it there and run
+# ulp-driver/test_ulp_modes.sh. Loads and unloads the module, so use
+# disposable VMs only.
+#
+# Usage: run_all_tests.sh <ssh-host> [<ssh-host>...]
 set -euo pipefail
+
+if [ $# -eq 0 ]; then
+    echo "usage: $0 <ssh-host> [<ssh-host>...]" >&2
+    exit 2
+fi
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${BLUE}======================================================================${NC}"
-echo -e "${BLUE}        ULP-DRIVER: UNIFIED REGRESSION TEST BATTERY          ${NC}"
-echo -e "${BLUE}======================================================================${NC}"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"  # repo root
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+FAILED=()
 
 sync_and_test() {
     local target="$1"
-    local desc="$2"
-    echo -e "\n${BLUE}>>> [TEST TARGET: $target] ($desc) <<<${NC}"
+    echo -e "\n${BLUE}>>> $target ($(ssh "$target" uname -r))${NC}"
 
-    echo "  1. Synchronizing files to $target..."
-    scp -r "$SCRIPT_DIR/ulp-driver" "$SCRIPT_DIR/frr-userspace-livepatch" "$SCRIPT_DIR/haproxy-livepatch" "$target:/root/ulp-driver/" >/dev/null
+    echo "  1. Copying ulp-driver/ to $target:/root/ulp-driver/..."
+    ssh "$target" 'mkdir -p /root/ulp-driver'
+    scp -r "$REPO_DIR/ulp-driver" "$target:/root/ulp-driver/" >/dev/null
 
-    echo "  2. Running automated test suite on $target..."
+    echo "  2. Building and running test_ulp_modes.sh on $target..."
     ssh "$target" '
         set -e
         cd /root/ulp-driver/ulp-driver
         make clean && make
-        install -m 755 ulp_ctl /usr/local/bin/ulp_ctl
-        install -m 755 ulp_inject /usr/local/bin/ulp_inject
-        chmod +x test_ulp_modes.sh
         ./test_ulp_modes.sh
     '
-    echo -e "  ${GREEN}>>> $target PASSED ALL 25 TEST BATTERY ASSERTIONS <<<${NC}"
 }
 
-sync_and_test "debian-13" "Debian 13 Trixie / Linux 6.12.107+deb13"
-sync_and_test "fkernel-dev" "Fedora Rawhide / Linux 7.3.0 (SELinux Enforcing)"
+for host in "$@"; do
+    if sync_and_test "$host"; then
+        echo -e "  ${GREEN}$host: passed${NC}"
+    else
+        echo -e "  ${RED}$host: FAILED${NC}"
+        FAILED+=("$host")
+    fi
+done
 
-echo -e "\n${GREEN}======================================================================${NC}"
-echo -e "${GREEN}  ALL TARGETS PASSED 100% REGRESSION SUITES (ZERO DEFECTS FOUND)      ${NC}"
-echo -e "${GREEN}======================================================================${NC}"
+if [ ${#FAILED[@]} -ne 0 ]; then
+    echo -e "\n${RED}Failed on: ${FAILED[*]}${NC}"
+    exit 1
+fi
+echo -e "\n${GREEN}All hosts passed.${NC}"

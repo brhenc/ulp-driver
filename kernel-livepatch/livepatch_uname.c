@@ -11,7 +11,7 @@ MODULE_INFO(livepatch, "Y");
 
 static int livepatch_version_proc_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "Linux version 7.3.0-LIVEPATCHED (fkernel-dev#1) (gcc 16.2) #1 SMP PREEMPT_DYNAMIC\n");
+	seq_printf(m, "Linux version 7.3.0-LIVEPATCHED (builder@localhost) (gcc 16.2) #1 SMP PREEMPT_DYNAMIC\n");
 	return 0;
 }
 

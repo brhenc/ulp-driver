@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
-# ulp-driver: Master Autonomous Tri-Service Test Controller
+# ulp-driver: reboot-persistence test for HAProxy, MariaDB and PostgreSQL.
+# Usage: run_tri_service_autonomous_loop.sh <ssh-host>
+# Reboots the host. Run only against a disposable test VM with the three
+# services installed (see test_tri_service_reboot.sh for the expected paths).
 set -euo pipefail
 
+HOST="${1:?usage: $0 <ssh-host>}"
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+
 echo "======================================================================"
-echo "    ULP-DRIVER: MASTER TRI-SERVICE AUTONOMOUS TEST LOOP       "
+echo "    ulp-driver: tri-service reboot persistence test"
 echo "======================================================================"
 
-# 1. Sync driver source to debian-13
-echo ">>> Step 1: Syncing codebase to debian-13..."
-scp -r "$(dirname "$(readlink -f "$0")")"/../../ulp-driver debian-13:/root/ulp-driver/
-scp "$(dirname "$(readlink -f "$0")")"/test_tri_service_reboot.sh debian-13:/root/test_tri_service_reboot.sh
+# 1. Sync driver source to $HOST
+echo ">>> Step 1: Syncing codebase to $HOST..."
+ssh "$HOST" 'mkdir -p /root/ulp-driver'
+scp -r "$REPO_DIR/ulp-driver" "$HOST:/root/ulp-driver/"
+scp "$REPO_DIR/scripts/dev-vm/test_tri_service_reboot.sh" "$HOST:/root/test_tri_service_reboot.sh"
 
-# 2. Build and install on debian-13
-echo ">>> Step 2: Compiling driver and tools on debian-13..."
-ssh debian-13 '
+# 2. Build and install on $HOST
+echo ">>> Step 2: Compiling driver and tools on $HOST..."
+ssh "$HOST" '
 cd /root/ulp-driver/ulp-driver
 make clean && make
 mkdir -p /lib/modules/$(uname -r)/extra
@@ -26,12 +33,12 @@ chmod +x /root/test_tri_service_reboot.sh
 '
 
 # 3. Run Pre-Reboot Setup & Verification
-echo ">>> Step 3: Executing Pre-Reboot Baseline on debian-13..."
-ssh debian-13 '/root/test_tri_service_reboot.sh'
+echo ">>> Step 3: Executing Pre-Reboot Baseline on $HOST..."
+ssh "$HOST" '/root/test_tri_service_reboot.sh'
 
 # 4. Trigger Reboot and Measure Boot Time
 echo ">>> Step 4: Triggering guest VM reboot..."
-ssh debian-13 'reboot' || true
+ssh "$HOST" 'reboot' || true
 
 START_TIME=$(date +%s)
 echo "Reboot initiated at $(date). Polling SSH connectivity..."
@@ -39,15 +46,10 @@ BOOT_SUCCESS=0
 
 for i in {1..35}; do
     ELAPSED=$(( $(date +%s) - START_TIME ))
-    ADDR=$(sudo virsh domifaddr debian-13 | grep -o '192.168.122.[0-9]*' || true)
-    if [ -n "$ADDR" ]; then
-        if ssh -o ConnectTimeout=1 -o BatchMode=yes debian-13 'uptime' 2>/dev/null; then
-            echo -e "\n=========================================================="
-            echo ">>> SUCCESS! debian-13 BOOTED CLEANLY IN ${ELAPSED} SECONDS! <<<"
-            echo "=========================================================="
-            BOOT_SUCCESS=1
-            break
-        fi
+    if ssh -o ConnectTimeout=1 -o BatchMode=yes "$HOST" 'uptime' 2>/dev/null; then
+        echo -e "\n>>> $HOST is back after ${ELAPSED} seconds"
+        BOOT_SUCCESS=1
+        break
     fi
     echo -n "[${ELAPSED}s] ."
     sleep 1
@@ -60,7 +62,7 @@ fi
 
 # 5. Post-Reboot Verification & Memory Machine Code Inspection
 echo ">>> Step 5: Performing Post-Reboot Livepatch & Memory Inspection..."
-ssh debian-13 '
+ssh "$HOST" '
 echo "--- 1. SYSTEM STATUS & UPTIME ---"
 uptime
 lsmod | grep ulp_driver
@@ -123,9 +125,9 @@ echo "Postgres Pre-Reboot Memory: $(cat /root/pre_postgres_mem.txt 2>/dev/null |
 echo "Postgres Post-Reboot Memory:$(cat /root/post_postgres_mem.txt 2>/dev/null || echo N/A)"
 
 echo -e "\n--- 8. KERNEL BOOT DMESG LOGS ---"
-dmesg | grep -E "ulp_driver|Kernel execve auto-patch|Enterprise Hardened"
+dmesg | grep -E "ulp_driver|Kernel execve auto-patch"
 '
 
 echo "======================================================================"
-echo ">>> TRI-SERVICE AUTONOMOUS REBOOT TEST PASSED WITH 100% SUCCESS! <<<"
+echo ">>> Tri-service reboot test finished; compare the pre/post output above <<<"
 echo "======================================================================"

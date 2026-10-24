@@ -202,6 +202,9 @@ struct ulp_cmd_v1 {
 	__u64 target_offset;
 	__u32 match_uid;
 	__u32 global_scope;
+	/* ULP_CMD_ADD_RULE: GNU build-id of binary_path; 0 length = unchecked */
+	__u8  build_id_len;
+	__u8  build_id[ULP_BUILD_ID_MAX];
 };
 
 #endif /* _ULP_UAPI_H */

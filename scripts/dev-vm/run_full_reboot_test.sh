@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage: run_full_reboot_test.sh <ssh-host>
+# Reboots the host. Run only against a disposable test VM.
+HOST="${1:?usage: $0 <ssh-host>}"
+REPO_DIR="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -8,31 +13,32 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${BLUE}======================================================================${NC}"
-echo -e "${BLUE}   EXECUTING CROSS-REBOOT LIVEPATCH PERSISTENCE TEST ON DEBIAN-13     ${NC}"
+echo -e "${BLUE}   EXECUTING CROSS-REBOOT LIVEPATCH PERSISTENCE TEST                 ${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 
-# 1. Sync driver and setup script to debian-13
-echo -e "${YELLOW}>>> Step 1: Syncing ULP driver and configuring persistence on debian-13...${NC}"
-scp -r "$(dirname "$(readlink -f "$0")")"/../../ulp-driver debian-13:/root/ulp-driver/
-scp "$(dirname "$(readlink -f "$0")")"/test_reboot_persistence.sh debian-13:/root/
+# 1. Sync driver and setup script to $HOST
+echo -e "${YELLOW}>>> Step 1: Syncing ULP driver and configuring persistence on $HOST...${NC}"
+ssh "$HOST" 'mkdir -p /root/ulp-driver'
+scp -r "$REPO_DIR/ulp-driver" "$HOST:/root/ulp-driver/"
+scp "$REPO_DIR/scripts/dev-vm/test_reboot_persistence.sh" "$HOST:/root/"
 
 # 2. Run Pre-Reboot Setup and State Recording
 echo -e "${YELLOW}>>> Step 2: Recording pre-reboot state and process memory...${NC}"
-ssh debian-13 '
+ssh "$HOST" '
 chmod +x /root/test_reboot_persistence.sh
 /root/test_reboot_persistence.sh
 '
 
-# 3. Reboot the debian-13 VM
-echo -e "\n${YELLOW}>>> Step 3: Rebooting debian-13 guest VM...${NC}"
-ssh debian-13 'reboot' || true
+# 3. Reboot the $HOST VM
+echo -e "\n${YELLOW}>>> Step 3: Rebooting $HOST guest VM...${NC}"
+ssh "$HOST" 'reboot' || true
 
-echo -e "${YELLOW}>>> Waiting for debian-13 to reboot and come back online...${NC}"
+echo -e "${YELLOW}>>> Waiting for $HOST to reboot and come back online...${NC}"
 sleep 5
 
 for i in {1..60}; do
-    if ssh -o ConnectTimeout=2 -o BatchMode=yes debian-13 'uptime' 2>/dev/null; then
-        echo -e "${GREEN}[+] debian-13 is back online!${NC}"
+    if ssh -o ConnectTimeout=2 -o BatchMode=yes "$HOST" 'uptime' 2>/dev/null; then
+        echo -e "${GREEN}[+] $HOST is back online!${NC}"
         break
     fi
     echo -n "."
@@ -47,7 +53,7 @@ echo -e "\n${BLUE}==============================================================
 echo -e "${BLUE}>>> Step 4: POST-REBOOT VERIFICATION & MEMORY INSPECTION <<<${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 
-ssh debian-13 '
+ssh "$HOST" '
 # Start HAProxy if not started via systemd
 if ! pidof haproxy >/dev/null 2>&1; then
     /usr/local/sbin/haproxy -f /tmp/haproxy_min.cfg -D || true
@@ -132,5 +138,5 @@ dmesg | grep -E "ulp_driver|Kernel execve auto-patch" | head -n 20
 '
 
 echo -e "\n${GREEN}======================================================================${NC}"
-echo -e "${GREEN}>>> CROSS-REBOOT LIVEPATCH PERSISTENCE VERIFIED SUCCESSFULLY! <<<${NC}"
+echo -e "${GREEN}>>> CROSS-REBOOT LIVEPATCH persistence test finished; compare the tables above <<<${NC}"
 echo -e "${GREEN}======================================================================${NC}"
