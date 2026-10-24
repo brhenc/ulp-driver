@@ -22,6 +22,10 @@ The project was prototyped with AI to test whether the approach is feasible befo
 - **Signatures are not enforced** on the injection path (see above).
 - **No post-quantum signing yet.** An earlier experimental implementation was removed; a real one (liboqs or OpenSSL 3.5 ML-DSA) is on the TODO list.
 - **`ulp_scope=1`** (same-UID access) checks matching credentials and refuses non-dumpable targets, but cannot apply Yama or LSM ptrace hooks (they are not exported to modules). Use the default root-only scope.
+- **Emergency override is not authenticated in the kernel.** `ULP_IOC_SET_OVERRIDE` is accepted from any `CAP_SYS_ADMIN` caller that supplies the public magic constants in `ulp_uapi.h`; the kernel verifies no HMAC. The TTL is capped at 300 seconds (default 60). The HMAC-SHA256 override ticket (`/etc/ulp/override.ticket`, `/etc/ulp/hmac.key`) is made by `ulp_persist` and checked only in userspace by `libulp_preload`; it does not protect against root.
+- **`state.bin` is trusted, not authenticated.** `/run/ulp/state.bin` is root-only and is read by the kernel only with `resume=1` (written only with `allow_resumption=1`). Fields are validated at restore (`tramp_len` must be 5 or 16, strings must be terminated), but there is no signature or HMAC.
+- **Write restrictions.** The driver refuses to write into `VM_SHARED` mappings, the target must be a `VM_EXEC` mapping, and the VMA is re-checked immediately before the write.
+- A security review and the follow-up work are tracked in [docs/SECURITY_AUDIT_PLAN.md](docs/SECURITY_AUDIT_PLAN.md).
 - The driver is **x86_64 only**. The other-architecture work is limited to emulation tests.
 - **Exec rules fire at the ELF entry point, not inside `execve()`.** Rules are armed with a uprobe on the binary's entry point (`uprobe_register` is exported by mainline, unlike `task_work_add`, so the module builds on Fedora and other vanilla kernels). The patch is written before the program's first instruction, after the dynamic loader has mapped the shared libraries. Rules are bound to the binary's inode when added: if the file is replaced, re-add the rule (persisted rules are re-armed by path at driver load).
 - Benchmarks and test results were run on a small number of personal test VMs.
@@ -94,7 +98,7 @@ sudo ulp-driver/ulp_ctl revert <pid> <target_hex_vaddr>             # address is
 
 ### `dev_mode` and the maintenance window
 
-By default the driver refuses to apply patches unless root has **armed a maintenance window**. `dev_mode=1` skips that check (and allows unloading the module and lowering `kernel.ulp_scope`), which is convenient for testing. Without `dev_mode`:
+By default the driver refuses to apply patches unless the calling file session has **armed a maintenance window** (`ULP_CMD_ARM`) and presents the current nonce. This applies equally to the ioctl path (`ULP_IOC_APPLY_PATCH`) and the `write()` command path (`ULP_CMD_APPLY_PATCH`); arming from one open file does not authorize another. `dev_mode=1` skips that check (and allows unloading the module and lowering `kernel.ulp_scope`), which is convenient for testing. Without `dev_mode`:
 
 ```bash
 sudo ulp_ctl --arm=60 apply <pid> ...   # arm for this command only; relocks when ulp_ctl exits

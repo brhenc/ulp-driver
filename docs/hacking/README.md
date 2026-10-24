@@ -19,6 +19,8 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 | [**`08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md`**](/docs/hacking/08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md) | **Development & Test Automation** | Debian 13 test VM, building `ulp_driver.ko`, running all automated benchmarks, writing new livepatches. |
 | [**`09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`**](/docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md) | **Canary Routing & Fault Recovery** | 1% canary traffic sampling, trampoline passthrough, SIGSEGV trapping in patched code, and auto-rollback (experimental). |
 
+| [**`SECURITY_AUDIT_PLAN.md`**](/docs/SECURITY_AUDIT_PLAN.md) | **Security Audit Plan** | Trust model, findings from the 2026-10-24 review, audit work plan, how to re-run the checks. |
+
 ---
 
 ## Quick Reference: Running the Test Suites

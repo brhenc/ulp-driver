@@ -39,7 +39,7 @@ To prevent accidental, concurrent, or malicious livepatch injection during norma
 ```
  ┌────────────────────────────────────────────────────────┐
  │                   ULP_STATE_LOCKED                     │
- │  (Default State: All apply/revert ioctls REJECTED)     │
+ │  (Default State: apply REJECTED unless session armed)  │
  └──────────────────────────┬─────────────────────────────┘
                             │ ULP_CMD_ARM (Token + TTL)
                             ▼
@@ -55,6 +55,9 @@ To prevent accidental, concurrent, or malicious livepatch injection during norma
  │  (Fail-Closed Auto-Lock: All modifications REJECTED)   │
  └────────────────────────────────────────────────────────┘
 ```
+
+### Apply gating (one model)
+Both apply paths, `ULP_IOC_APPLY_PATCH` and the `write()` command `ULP_CMD_APPLY_PATCH`, require that the caller's own open file session armed the driver (`ULP_CMD_ARM`), that the session nonce equals the current `g_arm_nonce`, and that the TTL has not elapsed. Arming in one file descriptor does not authorize applies from another. `dev_mode=1` bypasses this check entirely. Apply paths additionally refuse writes into `VM_SHARED` mappings, require the target to be a `VM_EXEC` mapping, and re-check the VMA immediately before the write.
 
 ### Implementation Details:
 * **Arming Request (`ULP_CMD_ARM`)**:
@@ -133,16 +136,16 @@ static void ulp_reap_dead_pids(void)
 
 ---
 
-## 5. Security Ratchet (`/proc/sys/kernel/ulp_mode`)
+## 5. Security Ratchet (`/proc/sys/kernel/ulp_scope`)
 
 A multi-mode sysctl ratchet governs global driver permissions:
 
 | Mode | Value | Enforcement Policy |
 | :--- | :--- | :--- |
 | **Disabled** | `0` | Driver is completely disabled. All commands return `-EPERM`. |
-| **Same-UID** | `1` | Callers can only patch processes matching their own `current_uid()`. |
-| **Root-Only** | `2` | Requires `capable(CAP_SYS_ADMIN)` and `capable(CAP_SYS_PTRACE)`. |
-| **Locked** | `3` | Permanent hardware security lock: mode cannot be downgraded without a full system reboot. |
+| **Same-UID** | `1` | Callers may patch processes with fully matching credentials that are dumpable by their owner (mirrors the core of `ptrace_may_access()`; Yama and LSM ptrace hooks are not applied). Only reachable if an admin relaxes the 0600 device node. |
+| **Root-Only** | `2` | Requires `capable(CAP_SYS_ADMIN)`. Default. |
+| **Locked** | `3` | Root-only, and the sysctl refuses to be lowered again; the module pins itself so it cannot be unloaded. Cleared only by reboot (or when loaded with `dev_mode=1`). |
 
 ---
 

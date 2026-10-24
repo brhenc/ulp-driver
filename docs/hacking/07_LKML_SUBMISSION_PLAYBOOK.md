@@ -27,10 +27,10 @@ config USERSPACE_LIVEPATCH
 	select KALLSYMS
 	help
 	  Say Y here to enable kernel-assisted userspace livepatching.
-	  This feature allows privileged administrators (CAP_SYS_ADMIN and
-	  CAP_SYS_PTRACE) to apply atomic, zero-downtime function trampolines
-	  and memory modifications to running userspace daemons without stopping
-	  worker threads or incurring ptrace-induced latency spikes.
+	  This feature allows privileged administrators (CAP_SYS_ADMIN) to
+	  apply function trampolines to running userspace daemons. The write
+	  itself is not atomic for 16-byte trampolines; the userspace tool
+	  stops the target's threads first.
 
 	  Designed for high-availability database engines, network proxies, and
 	  emergency zero-day CVE mitigations on running production systems.
@@ -52,8 +52,8 @@ config USERSPACE_LIVEPATCH
 
 ### Question 2 (Josh Poimboeuf / Ingo Molnar): *"Does this create a privilege escalation backdoor or bypass W^X and SELinux?"*
 * **Answer**:
-  1. **Strict Capability Checks**: Every operation enforces `capable(CAP_SYS_ADMIN)` and `capable(CAP_SYS_PTRACE)`.
-  2. **Sysctl Security Ratchet (`/proc/sys/kernel/ulp_mode`)**:
+  1. **Capability Checks**: Every mutating operation requires `capable(CAP_SYS_ADMIN)`; the device node is 0600 root. Applies additionally require that the calling fd armed a maintenance window (see `01_KERNEL_DRIVER_INTERNALS.md`).
+  2. **Sysctl Security Ratchet (`/proc/sys/kernel/ulp_scope`)**:
      * `0`: Disabled.
      * `1`: Same-UID only.
      * `2`: Root-only.

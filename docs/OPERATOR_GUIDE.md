@@ -102,6 +102,9 @@ ulp_ctl set-override <bin_path> [ttl_seconds]
 # Clear active override
 ulp_ctl clear-override
 ```
+`set-override` issues `ULP_IOC_SET_OVERRIDE`. The kernel accepts it from any caller with `CAP_SYS_ADMIN` whose request carries the four magic constants from `ulp_uapi.h`; those constants are public and the kernel does **not** verify an HMAC or signature. The TTL defaults to 60 seconds and is capped at 300.
+
+Separately, `ulp_persist` can write an HMAC-SHA256 override ticket (`/etc/ulp/override.ticket`, keyed by `/etc/ulp/hmac.key`). Only `libulp_preload.c` verifies it, in userspace. Both files are root-owned, so the HMAC guards against corruption and non-root tampering, not against root. Anyone who can write `/etc/ulp` can forge a ticket.
 
 ---
 

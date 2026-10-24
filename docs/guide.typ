@@ -352,7 +352,7 @@ The first fix deferred the write with `task_work_add(..., TWA_RESUME)`, which ru
 == The Solution: a uprobe on the ELF entry point
 Each exec rule is armed with `uprobe_register()`, an exported API, on the entry point (`e_entry`, i.e. `_start`) of the rule's binary. The driver reads the ELF header once when the rule is added, translates `e_entry` to a file offset through its `PT_LOAD` segment, and registers the probe on the file's inode.
 
-Every process that executes that binary then traps once, at its very first instruction. The uprobe handler runs in the new process's own context: sleepable, preemptible, no kernel locks held. It checks the rule's UID/GID/parent constraints and the emergency override, verifies the GNU build-id, and pokes the trampoline into the freshly mapped text.
+Every process that executes that binary then traps once, at its very first instruction. The uprobe handler runs in the new process's own context: sleepable, preemptible, no kernel locks held. It checks the rule's UID/GID/parent constraints and the in-kernel emergency override (set by `CAP_SYS_ADMIN` plus public magic constants; the kernel verifies no HMAC), verifies the GNU build-id, and pokes the trampoline into the freshly mapped text.
 
 Because the trap sits on `_start`, the dynamic loader has already mapped all shared libraries, but none of the program's own code has run; in particular its constructors have not run yet (glibc's `ld.so` leaves the main executable's `.init_array` to `__libc_start_main`).
 
@@ -402,7 +402,7 @@ The driver operates under two distinct states:
            |             [Maintenance Window Mode]                 |
            |  - Session bound to active file descriptor            |
            |  - Mandatory hardware TTL countdown timer (max 300s)  |
-           |  - Random 32-bit Arming Nonce validates all writes    |
+           |  - Session's 32-bit arming nonce gates every apply   |
            |  - Livepatch memory injection ALLOWED                 |
            +-------------------------------------------------------+
 ```

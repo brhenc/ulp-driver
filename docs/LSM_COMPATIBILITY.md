@@ -76,7 +76,7 @@ This document specifies how `ulp_driver` interfaces with each active security mo
 * **Tamper-Resistance Analysis**:
   - **DAC Protection**: Mode `0600` root-only permissions in `/run/ulp/` (RAM-backed `tmpfs`).
   - **Anti-Injection Invariant**: `ulp_restore_state()` inspects running processes and verifies that memory at `target_vaddr` already matches `prec.patch_bytes`. An attacker cannot inject arbitrary code by altering `state.bin`.
-  - **Rollback Hardening**: An attacker with root could alter `orig_bytes`, leading to corrupted rollback when running `ulp_ctl revert`. To prevent this, `state.bin` should be protected by SELinux type enforcement (`ulp_runtime_t`) and in-kernel HMAC verification.
+  - **Rollback Hardening**: An attacker with root could alter `orig_bytes`, leading to corrupted rollback when running `ulp_ctl revert`. The file is root-only and trusted, but it is **not authenticated**: the driver does not verify an HMAC or signature on it. `state.bin` should be protected by SELinux type enforcement (`ulp_runtime_t`). The kernel reads it only when loaded with `resume=1` (and it is written only with `allow_resumption=1`). At restore, every field is validated (for example `tramp_len` must be 5 or 16 and strings must be NUL-terminated) and malformed records are rejected, but a root-written file that is well-formed is believed.
 
 ---
 
