@@ -460,6 +460,10 @@ static int ulp_verify_vma(struct mm_struct *mm, __u64 vaddr)
 		pr_err("[ulp_driver] Target vaddr 0x%llx is not in an executable VMA (flags=0x%lx)\n",
 			   vaddr, vma->vm_flags);
 		ret = -EACCES;
+	} else if (vma->vm_flags & (VM_SHARED | VM_MAYSHARE)) {
+		pr_err("[ulp_driver] Target vaddr 0x%llx is in a shared mapping (flags=0x%lx); refusing to write\n",
+		       vaddr, vma->vm_flags);
+		ret = -EACCES;
 	}
 	mmap_read_unlock(mm);
 
@@ -532,7 +536,18 @@ static int ulp_verify_futex_unlocked(struct task_struct *task, __u64 futex_vaddr
 /* Atomic Direct Text Poke (Supports 5-byte relative and 16-byte absolute trampolines) */
 static int ulp_atomic_direct_poke(struct task_struct *task, __u64 vaddr, const __u8 *new_bytes, __u32 tramp_len, bool is_revert)
 {
+	struct mm_struct *mm;
 	int bytes;
+	int ret;
+
+	/* Re-validate the VMA right before writing to narrow the check-to-write window */
+	mm = get_task_mm(task);
+	if (!mm)
+		return -ESRCH;
+	ret = ulp_verify_vma(mm, vaddr);
+	mmput(mm);
+	if (ret)
+		return ret;
 
 	if (tramp_len == 5) {
 		__u8 word[8];
@@ -1097,6 +1112,7 @@ static long ulp_list_rules(struct ulp_kernel_rules_list __user *user_list)
 static long ulp_set_override(struct ulp_override_req *req)
 {
 	unsigned long flags;
+	u32 ttl;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -1112,15 +1128,19 @@ static long ulp_set_override(struct ulp_override_req *req)
 		return -EINVAL;
 	}
 
+	ttl = req->ttl_seconds ? req->ttl_seconds : 60;
+	if (ttl > 300)
+		ttl = 300;
+
 	spin_lock_irqsave(&g_rule_lock, flags);
 	memcpy(g_override_state.magic, req->magic, sizeof(req->magic));
 	strscpy(g_override_state.binary_path, req->binary_path, sizeof(g_override_state.binary_path));
-	g_override_state.expires_jiffies = jiffies + (req->ttl_seconds * HZ);
+	g_override_state.expires_jiffies = jiffies + ((unsigned long)ttl * HZ);
 	g_override_state.active = 1;
 	spin_unlock_irqrestore(&g_rule_lock, flags);
 
 	pr_warn("[ulp_driver] Emergency kernel override activated for '%s' (TTL: %u seconds)\n",
-			req->binary_path, req->ttl_seconds);
+			req->binary_path, ttl);
 	return 0;
 }
 
@@ -1289,6 +1309,7 @@ static void ulp_exec_apply_rule(const struct ulp_kernel_rule *krule)
 	struct ulp_patch_entry *p_entry = NULL;
 	struct file *exe_file = NULL;
 	u64 target_vaddr = 0;
+	bool shared = false;
 	int ret;
 	unsigned long flags;
 
@@ -1304,6 +1325,10 @@ static void ulp_exec_apply_rule(const struct ulp_kernel_rule *krule)
 	VMA_ITERATOR(vmi, mm, 0);
 	for_each_vma(vmi, vma) {
 		if ((vma->vm_flags & VM_EXEC) && vma->vm_file && (vma->vm_file == mm->exe_file)) {
+			if (vma->vm_flags & (VM_SHARED | VM_MAYSHARE)) {
+				shared = true;
+				break;
+			}
 			if (krule->pie)
 				target_vaddr = vma->vm_start - krule->exec_seg_vaddr + rule->target_offset;
 			else
@@ -1315,6 +1340,12 @@ static void ulp_exec_apply_rule(const struct ulp_kernel_rule *krule)
 		}
 	}
 	mmap_read_unlock(mm);
+
+	if (shared) {
+		pr_warn_ratelimited("[ulp_driver] rule '%s': executable mapping of %s (PID %d) is shared, skipping\n",
+				    rule->patch_name, rule->binary_path, task->pid);
+		return;
+	}
 
 	if (!target_vaddr) {
 		pr_warn_ratelimited("[ulp_driver] rule '%s': offset 0x%llx is outside the executable mapping of %s (PID %d)\n",
@@ -1552,6 +1583,11 @@ static void ulp_rule_disarm(struct ulp_kernel_rule *rule)
 	rule->uprobe = NULL;
 }
 
+struct ulp_file_session {
+	bool is_armed;
+	u32 nonce;
+};
+
 static long ulp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct ulp_patch_req req;
@@ -1561,11 +1597,13 @@ static long ulp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case ULP_IOC_APPLY_PATCH: {
+		struct ulp_file_session *sess = filp->private_data;
 		unsigned long flags;
 		bool is_armed;
 
 		spin_lock_irqsave(&g_arm_lock, flags);
-		is_armed = (g_driver_state == ULP_STATE_ARMED && time_before(jiffies, g_armed_until));
+		is_armed = (g_driver_state == ULP_STATE_ARMED && time_before(jiffies, g_armed_until) &&
+			    sess && sess->is_armed && sess->nonce == g_arm_nonce);
 		spin_unlock_irqrestore(&g_arm_lock, flags);
 
 		if (!is_armed && !ulp_dev_mode) {
@@ -1674,11 +1712,6 @@ static const struct proc_ops ulp_proc_ops = {
 	.proc_release = single_release,
 };
 
-struct ulp_file_session {
-	bool is_armed;
-	u32 nonce;
-};
-
 static int ulp_fops_open(struct inode *inode, struct file *file)
 {
 	struct ulp_file_session *sess;
@@ -1773,6 +1806,10 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 	if (ret)
 		return ret;
 
+	cmd.patch_name[sizeof(cmd.patch_name) - 1] = '\0';
+	cmd.func_name[sizeof(cmd.func_name) - 1] = '\0';
+	cmd.binary_path[sizeof(cmd.binary_path) - 1] = '\0';
+
 	switch (cmd.cmd_type) {
 	case ULP_CMD_ARM: {
 		u32 ttl = cmd.ttl_seconds ? cmd.ttl_seconds : 60;
@@ -1818,8 +1855,6 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 
 		spin_lock_irqsave(&g_arm_lock, flags);
 		session_ok = (sess && sess->is_armed && sess->nonce == g_arm_nonce);
-		if (cmd.arm_nonce && cmd.arm_nonce == g_arm_nonce)
-			session_ok = true;
 
 		if (g_driver_state != ULP_STATE_ARMED || !session_ok || time_after(jiffies, g_armed_until)) {
 			spin_unlock_irqrestore(&g_arm_lock, flags);
@@ -1868,8 +1903,6 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 
 		spin_lock_irqsave(&g_arm_lock, flags);
 		session_ok = (sess && sess->is_armed && sess->nonce == g_arm_nonce);
-		if (cmd.arm_nonce && cmd.arm_nonce == g_arm_nonce)
-			session_ok = true;
 
 		if (g_driver_state != ULP_STATE_ARMED || !session_ok || time_after(jiffies, g_armed_until)) {
 			spin_unlock_irqrestore(&g_arm_lock, flags);
@@ -2106,6 +2139,17 @@ static int ulp_restore_state(void)
 			break;
 		}
 
+		prec.info.comm[sizeof(prec.info.comm) - 1] = '\0';
+		prec.info.patch_name[sizeof(prec.info.patch_name) - 1] = '\0';
+		prec.info.func_name[sizeof(prec.info.func_name) - 1] = '\0';
+
+		if (prec.info.tramp_len != 5 && prec.info.tramp_len != 16) {
+			pr_warn("[ulp_driver] Invalid trampoline length %u in patch record %u, skipping\n",
+				prec.info.tramp_len, i);
+			continue;
+		}
+		prec.info.enabled = !!prec.info.enabled;
+
 		task = ulp_get_task_by_pid(prec.info.target_pid);
 		if (!task) {
 			pr_info("[ulp_driver] PID %u no longer active during resumption, skipping livepatch '%s'\n",
@@ -2175,13 +2219,23 @@ static int ulp_restore_state(void)
 			break;
 		}
 
+		rrec.req.binary_path[sizeof(rrec.req.binary_path) - 1] = '\0';
+		rrec.req.patch_name[sizeof(rrec.req.patch_name) - 1] = '\0';
+		rrec.req.func_name[sizeof(rrec.req.func_name) - 1] = '\0';
+
+		if (rrec.req.build_id_len > ULP_BUILD_ID_MAX) {
+			pr_warn("[ulp_driver] Invalid build-id length %u in rule record %u, skipping\n",
+				rrec.req.build_id_len, i);
+			continue;
+		}
+
 		new_rule = kzalloc(sizeof(*new_rule), GFP_KERNEL);
 		if (!new_rule)
 			continue;
 
 		memcpy(&new_rule->req, &rrec.req, sizeof(new_rule->req));
 		new_rule->creator_uid = rrec.creator_uid;
-		new_rule->enabled = rrec.enabled;
+		new_rule->enabled = !!rrec.enabled;
 
 		ret = ulp_rule_arm(new_rule);
 		if (ret) {

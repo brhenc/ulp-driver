@@ -50,8 +50,17 @@ make clean && make
 rmmod ulp_driver 2>/dev/null || true
 # dev_mode=1 bypasses the maintenance-window arming gate so suites 0-2 can test scope checks in isolation
 insmod ulp_driver.ko dev_mode=1 2>/dev/null || true
-# /dev/ulp is created 0600; scope 1 needs unprivileged users to reach the ioctl
+# /dev/ulp is created 0600; scope 1 needs unprivileged users to reach the ioctl.
+# udev applies the driver's mode asynchronously after the add event and would undo
+# an earlier chmod, so wait for it to finish first.
+udevadm settle 2>/dev/null || sleep 1
 chmod 666 /dev/ulp
+# ulp_ctl stops the target's threads with ptrace before patching. Yama scope 1
+# (Fedora's default) only lets a process attach to its descendants, so the
+# same-UID tests need scope 0 for the duration of the run.
+YAMA_SAVED=$(sysctl -n kernel.yama.ptrace_scope 2>/dev/null || echo "")
+[ -n "$YAMA_SAVED" ] && sysctl -w kernel.yama.ptrace_scope=0 >/dev/null
+trap '[ -n "$YAMA_SAVED" ] && sysctl -w kernel.yama.ptrace_scope="$YAMA_SAVED" >/dev/null' EXIT
 
 # Install ulp_ctl and ulp_inject globally
 install -m 755 ulp_ctl /usr/local/bin/ulp_ctl

@@ -67,15 +67,25 @@ struct ulp_list_req {
 	struct ulp_patch_info entries[ULP_MAX_PATCH_RECORDS];
 };
 
-/* 256-bit magic value for the emergency override request */
+/*
+ * 256-bit magic value for the emergency override request. These constants are
+ * public (they are in this header): they guard against accidental or
+ * malformed requests, not against a caller who wants to forge one.
+ */
 #define ULP_OVERRIDE_MAGIC_0 0xA55AA55A69966996ULL
 #define ULP_OVERRIDE_MAGIC_1 0x5AA55AA596699669ULL
 #define ULP_OVERRIDE_MAGIC_2 0xF00FF00F0FF00FF0ULL
 #define ULP_OVERRIDE_MAGIC_3 0x0FF00FF0F00FF00FULL
 
 /**
- * struct ulp_override_ticket - Authenticated, Cryptographically Signed Override Token
- * Used to temporarily disable livepatching for emergency recovery .
+ * struct ulp_override_ticket - Userspace override ticket (/etc/ulp/override.ticket)
+ * Used to temporarily disable livepatching for emergency recovery.
+ *
+ * The kernel never sees or verifies this structure. It is produced by
+ * ulp_persist and verified only in userspace by libulp_preload.c, which checks
+ * the magic, binary path, timestamps and the HMAC-SHA256 against the key in
+ * /etc/ulp/hmac.key. Both files are root-owned; the HMAC protects against
+ * corruption and non-root tampering, not against root.
  */
 struct ulp_override_ticket {
 	__u64 magic[4];           /* ULP_OVERRIDE_MAGIC_0..3 */
@@ -119,7 +129,12 @@ struct ulp_kernel_rules_list {
 };
 
 /**
- * struct ulp_override_req - Emergency override request
+ * struct ulp_override_req - Emergency override request (ULP_IOC_SET_OVERRIDE)
+ *
+ * The kernel accepts this when the caller has CAP_SYS_ADMIN and magic[] matches
+ * the public ULP_OVERRIDE_MAGIC_* constants. It does not verify any HMAC or
+ * signature; the HMAC ticket above is a separate, userspace-only mechanism.
+ * ttl_seconds is capped at 300 (0 means the default of 60).
  */
 struct ulp_override_req {
 	__u64 magic[4];                /* ULP_OVERRIDE_MAGIC_0..3 */
@@ -188,7 +203,7 @@ struct ulp_event {
 struct ulp_cmd_v1 {
 	__u32 size;             /* sizeof(struct ulp_cmd_v1) - always first field */
 	__u32 cmd_type;         /* enum ulp_vfs_cmd_type */
-	__u32 arm_nonce;        /* Nonce validation matching active armed session */
+	__u32 arm_nonce;        /* Unused: an apply is accepted only from the fd that armed the driver */
 	__u32 ttl_seconds;      /* For ULP_CMD_ARM: TTL in seconds (default 60, max 300) */
 	__u64 target_pid;       /* Target process PID */
 	__u64 target_vaddr;     /* Function target virtual address */

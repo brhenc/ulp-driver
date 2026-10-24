@@ -184,6 +184,18 @@ static void ulp_early_exec_init(void)
         return;
     }
 
+    /* The driver only accepts an apply from the fd that armed it: arm this fd briefly */
+    struct ulp_cmd_v1 arm;
+    memset(&arm, 0, sizeof(arm));
+    arm.size = sizeof(arm);
+    arm.cmd_type = ULP_CMD_ARM;
+    arm.ttl_seconds = 5;
+    if (write(dev_fd, &arm, sizeof(arm)) < 0) {
+        syslog(LOG_ERR, "[ULP] Early-exec: cannot arm /dev/ulp for PID %d", getpid());
+        close(dev_fd);
+        return;
+    }
+
     struct ulp_patch_req req;
     memset(&req, 0, sizeof(req));
     req.target_pid = (uint32_t)getpid();
