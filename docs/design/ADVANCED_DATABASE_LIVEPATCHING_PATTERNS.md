@@ -144,7 +144,7 @@ Client Connection Request (New TCP Socket)
 
 ### 2.3 Live VM Verification on MariaDB 11.8.6
 
-We verified this on the active MariaDB daemon on the Debian 13 VM (`192.168.122.171`):
+We verified this on the active MariaDB daemon on a Debian 13 test VM:
 
 #### 1. Function Disassembly Before Livepatch:
 ```assembly

@@ -77,7 +77,7 @@ Go binaries statically embed the **Program Counter Line Table (`.gopclntab`)**. 
 
 ## 4. Multi-Version Continuous Livepatch Verification
 
-Verified live on Debian 13 VM (`192.168.122.171`) via [`go-livepatch-bench/test_go_continuous_livepatch.py`](/go-livepatch-bench/test_go_continuous_livepatch.py):
+Verified on a Debian 13 test VM via [`go-livepatch-bench/test_go_continuous_livepatch.py`](/go-livepatch-bench/test_go_continuous_livepatch.py):
 
 ```
 ==============================================================================

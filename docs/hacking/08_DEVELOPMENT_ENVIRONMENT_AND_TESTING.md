@@ -1,7 +1,7 @@
 # Development Environment, VM Infrastructure & Test Automation
 
 **Module:** Developer Operations & Testing Guide  
-**Test VM:** Debian 13 (Trixie) x86_64 (`192.168.122.171`)  
+**Test VM:** Debian 13 (Trixie) x86_64 libvirt guest  
 **Path:** `docs/hacking/08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md`  
 
 ---
@@ -9,10 +9,8 @@
 ## 1. Test Environment Setup & Virtualization
 
 ### 1.1 Debian 13 Test VM Access
-The test infrastructure runs a dedicated Debian 13 libvirt guest (`debian-13`):
-* **Guest IP**: `192.168.122.171`
-* **SSH Access**: `ssh root@192.168.122.171`
-* **Pre-Installed Daemons**:
+The tests run against a disposable Debian 13 libvirt guest, reached over ssh as root. The `scripts/dev-vm/` scripts take its ssh host name as their first argument; `vm-provisioning/provision_fkernel_vm.sh` creates an equivalent Fedora guest.
+* **Pre-Installed Daemons** (expected by the reboot tests):
   * MariaDB 11.8.6 Enterprise Daemon (`/usr/sbin/mariadbd`, Port 3306)
   * PostgreSQL 17 (`/usr/lib/postgresql/17/bin/postgres`, Port 5432)
   * HAProxy 3.0 (`/usr/local/sbin/haproxy`, Port 8080)
@@ -25,7 +23,7 @@ The test infrastructure runs a dedicated Debian 13 libvirt guest (`debian-13`):
 virsh -c qemu:///system list --all
 
 # Start test guest if stopped
-virsh -c qemu:///system start debian-13
+virsh -c qemu:///system start <vm-name>
 ```
 
 ---

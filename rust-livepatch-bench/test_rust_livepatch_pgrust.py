@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test Harness: Livepatching Rust Functions & Shadow Data Structures in pgrust_daemon
-Executes on debian-13 under active multi-threaded client traffic.
+Runs on a test VM with the driver loaded, under multi-threaded client traffic.
 """
 
 import os

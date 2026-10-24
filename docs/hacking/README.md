@@ -16,7 +16,7 @@ Welcome to the complete internal developer documentation for **ulp-driver** (Use
 | [**`05_ADVANCED_DATABASE_PATTERNS_AND_SOCKETS.md`**](/docs/hacking/05_ADVANCED_DATABASE_PATTERNS_AND_SOCKETS.md) | **Database Patterns & Socket Backlogs** | 32-bit $\to$ 64-bit autoinc expansion, dynamic `max_connections`, zero-downtime socket backlog expansion (`ss -tlpn` $80 \to 300$). |
 | [**`06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md`**](/docs/hacking/06_OPERATOR_TOOLING_TUI_AND_AUTOMATION.md) | **Operator Dashboard & Tooling** | Curses TUI (`tools/ulp_tui.py`), Plan 9 VFS telemetry, Cosign/GPG verification, continuous multi-generation suite. |
 | [**`07_LKML_SUBMISSION_PLAYBOOK.md`**](/docs/hacking/07_LKML_SUBMISSION_PLAYBOOK.md) | **LKML Upstream Submission Playbook** | `CONFIG_USERSPACE_LIVEPATCH`, reviewer pushback answers (Peter Zijlstra, Josh Poimboeuf), `checkpatch.pl`, patch submission. |
-| [**`08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md`**](/docs/hacking/08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md) | **Development & Test Automation** | Debian 13 VM (`192.168.122.171`), building `ulp_driver.ko`, running all automated benchmarks, writing new livepatches. |
+| [**`08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md`**](/docs/hacking/08_DEVELOPMENT_ENVIRONMENT_AND_TESTING.md) | **Development & Test Automation** | Debian 13 test VM, building `ulp_driver.ko`, running all automated benchmarks, writing new livepatches. |
 | [**`09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`**](/docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md) | **Canary Routing & Fault Recovery** | 1% canary traffic sampling, trampoline passthrough, SIGSEGV trapping in patched code, and auto-rollback (experimental). |
 
 ---

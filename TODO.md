@@ -44,7 +44,7 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
   - stripped binaries (`.eh_frame`) and Go (`.gopclntab`)
   - functions under 16 bytes: map the payload within ±2 GB of the target so the 5-byte jump can reach it
 - [ ] **`ulp_scope=1` is effectively unusable without `dev_mode`.** Same-user patching still needs an armed window, and only root can arm (via `/dev/ulp` write, which requires `CAP_SYS_ADMIN`), so a root operator has to hold `ulp_ctl arm` open. Decide whether arming should be per-scope, delegable, or documented as root-mediated.
-- [x] Moved the root-level `test_*`/`run_*` scripts into `tests/` and `scripts/dev-vm/` (the latter tied to the author's VMs `debian-13`/`fkernel-dev`).
+- [x] Moved the root-level `test_*`/`run_*` scripts into `tests/` and `scripts/dev-vm/` (the latter take the ssh host of a disposable test VM as an argument).
 - [ ] **Remove personal VM hostnames from the docs** that mention them, and make `scripts/dev-vm/` take the host as an argument.
 - [ ] **Re-run `examples/test_all_examples.sh` from a fresh clone** after the switch to in-repo tool defaults (this needs a host where the module isn't pinned at scope 3).
 - [ ] **Patch validation workflow:** build and test patches against a clone of the exact deployed binary, matched by build-id and library versions, ideally with replayed production traffic.

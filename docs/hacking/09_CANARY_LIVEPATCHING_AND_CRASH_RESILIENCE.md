@@ -4,7 +4,7 @@
 **Path:** `docs/hacking/09_CANARY_LIVEPATCHING_AND_CRASH_RESILIENCE.md`  
 **Goal:** Progressive 1% canary routing, and automatic rollback when patched code faults  
 **Tested Targets:** High-Throughput Edge Daemon (`server_daemon.c`) & Production **HAProxy 3.5-dev3**  
-**Verified Environments:** `debian-13` (Linux Kernel 6.12.x) & `fedora-44` (Linux Kernel 7.1.x)  
+**Verified Environments:** Debian 13 (Linux 6.12.x) and Fedora 44 (Linux 7.1.x) test VMs  
 
 ---
 

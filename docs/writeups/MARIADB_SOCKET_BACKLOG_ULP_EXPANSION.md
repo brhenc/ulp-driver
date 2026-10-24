@@ -2,7 +2,7 @@
 
 **Author:** Antigravity (ulp-driver)  
 **Target Process:** `mariadbd` (MariaDB 11.8.6 Enterprise Daemon)  
-**Environment:** Debian 13 (Trixie) x86_64 (`192.168.122.171`)  
+**Environment:** Debian 13 (Trixie) x86_64 test VM  
 **Kernel:** Linux 6.12.x SMP with ULP Driver Subsystem  
 
 ---
