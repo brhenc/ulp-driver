@@ -27,7 +27,7 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
 
 ## Portability
 
-- [ ] **The driver builds only on kernels that export `task_work_add`.** Mainline Linux has never exported it. Debian adds the export in `debian/export-symbols-needed-by-android-drivers.patch` (for binder). On Fedora 7.1/7.2 and other mainline-based kernels, the module fails at modpost. It's used only in the exec-rule path (`ulp_exec_task_work_fn`). Earlier upstream attempts to export it were not merged (NVMe RFC 2021, DRM 2021, ublk 2022; see the Jens Axboe and Christoph Hellwig replies in the 2022 thread).
+- [x] **The driver built only on kernels that export `task_work_add`** (Debian's `export-symbols-needed-by-android-drivers.patch`; mainline never exported it and upstream attempts in 2021/2022 were rejected). Fixed by dropping task_work and the `arch_setup_additional_pages` kprobe: each exec rule now registers a uprobe (exported API) on the binary's ELF entry point and applies the patch from the uprobe handler, which runs in the new task's own sleepable context. Verified on Fedora 7.3-rc0 (debug kernel) with `examples/04_exec_rule_persistence`.
 - [ ] **The driver is x86_64 only** (for example, the fork kprobe reads `regs->di`). The other-architecture work exists only as emulated trampoline tests.
 
 ## Security
@@ -52,7 +52,7 @@ Known shortcomings, roughly in priority order. See also the "Status & limitation
 
 ## Direction
 
-- [ ] **ptrace-only "break-glass" mode** for unprepared systems where the kernel module can't be loaded (Secure Boot module signing, lockdown, kernels without `task_work_add`). The driver stays the optional layer for managed fleets (persistence, policy, driver reloads).
+- [ ] **ptrace-only "break-glass" mode** for unprepared systems where the kernel module can't be loaded (Secure Boot module signing, lockdown). The driver stays the optional layer for managed fleets (persistence, policy, driver reloads).
 - [ ] Prefer patch sites reserved by `-fpatchable-function-entry` (see `patches/rustc-patchable-function-entry.patch` for rustc) when available. Fall back to overwriting live instructions for unprepared binaries.
 
 ## Docs

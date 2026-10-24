@@ -53,13 +53,26 @@
 #include <linux/kprobes.h>
 #include <linux/dcache.h>
 #include <linux/highmem.h>
-#include <linux/task_work.h>
+#include <linux/uprobes.h>
+#include <linux/elf.h>
+#include <linux/fs.h>
 #include <linux/kfifo.h>
 #include <linux/poll.h>
 #include <linux/timer.h>
 #include <linux/random.h>
 #include <linux/moduleparam.h>
 #include "ulp_uapi.h"
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+#error "ulp_driver needs Linux 6.12+ (uprobe_register() returning struct uprobe *)"
+#endif
+
+/* 6.13 added the session-data argument to uprobe consumer handlers. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 13, 0)
+#define ULP_UPROBE_HANDLER_ARGS struct uprobe_consumer *uc, struct pt_regs *regs, __u64 *data
+#else
+#define ULP_UPROBE_HANDLER_ARGS struct uprobe_consumer *uc, struct pt_regs *regs
+#endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 14, 0)
 #ifndef del_timer
@@ -71,7 +84,7 @@
 #endif
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("ulp-driver <bhenc@ceresia.ch>");
+MODULE_AUTHOR("Bruno Henc <hencb@protonmail.com>");
 MODULE_DESCRIPTION("x86_64 userspace livepatching driver (experimental)");
 MODULE_VERSION("3.0.0");
 
@@ -199,17 +212,30 @@ static LIST_HEAD(g_patch_list);
 static DEFINE_SPINLOCK(g_patch_lock);
 static atomic_t g_active_patches = ATOMIC_INIT(0);
 
+/*
+ * Exec rules are armed with a uprobe on the ELF entry point of the rule's
+ * binary. The handler runs in the new process's own context, sleepable, right
+ * before its first instruction executes, which is the point where the patch
+ * is written. This needs only exported APIs (uprobe_register() and friends),
+ * unlike task_work_add(), which mainline does not export to modules.
+ */
 struct ulp_kernel_rule {
 	struct list_head list;
 	struct rcu_head rcu;
 	struct ulp_kernel_rule_req req;
 	uid_t creator_uid;
 	u8 enabled;
+	struct uprobe_consumer uc;
+	struct uprobe *uprobe;	/* NULL when the rule could not be armed */
+	loff_t entry_offset;
 };
 
 static LIST_HEAD(g_rule_list);
 static DEFINE_SPINLOCK(g_rule_lock);
 static atomic_t g_active_rules = ATOMIC_INIT(0);
+
+static int ulp_rule_arm(struct ulp_kernel_rule *rule);
+static void ulp_rule_disarm(struct ulp_kernel_rule *rule);
 
 /* =========================================================================
  * Driver Resumption & State Handoff Architecture
@@ -314,7 +340,6 @@ static inline void ulp_unpin_module_ref(void)
 
 /* Tracking kprobe registration states */
 static bool g_kp_fork_registered;
-static bool g_kp_exec_registered;
 
 /* Emergency override state, validated with a 256-bit magic value */
 static struct {
@@ -960,6 +985,7 @@ static long ulp_add_rule(struct ulp_kernel_rule_req *req)
 {
 	struct ulp_kernel_rule *rule;
 	unsigned long flags;
+	int ret;
 
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
@@ -982,14 +1008,21 @@ static long ulp_add_rule(struct ulp_kernel_rule_req *req)
 	rule->creator_uid = from_kuid(&init_user_ns, current_uid());
 	rule->enabled = 1;
 
+	ret = ulp_rule_arm(rule);
+	if (ret) {
+		pr_err("[ulp_driver] cannot arm rule for %s: %d\n", req->binary_path, ret);
+		kfree(rule);
+		return ret;
+	}
+
 	spin_lock_irqsave(&g_rule_lock, flags);
 	list_add_tail_rcu(&rule->list, &g_rule_list);
 	atomic_inc(&g_active_rules);
 	spin_unlock_irqrestore(&g_rule_lock, flags);
 
-	pr_info("[ulp_driver] Registered in-kernel persistent rule: %s -> offset 0x%llx [%s::%s] (UID %u, Global %u)\n",
-			req->binary_path, req->target_offset, req->patch_name, req->func_name,
-			req->match_uid, req->global_scope);
+	pr_info("[ulp_driver] Registered in-kernel persistent rule: %s (entry @0x%llx) -> offset 0x%llx [%s::%s] (UID %u, Global %u)\n",
+			req->binary_path, (u64)rule->entry_offset, req->target_offset, req->patch_name,
+			req->func_name, req->match_uid, req->global_scope);
 	return 0;
 }
 
@@ -1010,14 +1043,20 @@ static long ulp_del_rule(struct ulp_kernel_rule_req *req)
 			rule->req.target_offset == req->target_offset) {
 			list_del_rcu(&rule->list);
 			atomic_dec(&g_active_rules);
-			kfree_rcu(rule, rcu);
 			found = true;
 			break;
 		}
 	}
 	spin_unlock_irqrestore(&g_rule_lock, flags);
 
-	return found ? 0 : -ENOENT;
+	if (!found)
+		return -ENOENT;
+
+	/* Sleeps: waits for in-flight uprobe handlers before the rule is freed. */
+	ulp_rule_disarm(rule);
+	uprobe_unregister_sync();
+	kfree_rcu(rule, rcu);
+	return 0;
 }
 
 static long ulp_list_rules(struct ulp_kernel_rules_list __user *user_list)
@@ -1099,7 +1138,6 @@ static long ulp_clear_override(void)
 }
 
 static struct kprobe kp_fork;
-static struct kprobe kp_exec;
 
 /* Fork Inheritance: Runs in scheduler atomic context (wake_up_new_task) */
 static int ulp_probe_fork(struct kprobe *p, struct pt_regs *regs)
@@ -1169,12 +1207,6 @@ static int ulp_probe_fork(struct kprobe *p, struct pt_regs *regs)
 	return 0;
 }
 
-/* Task Work Structure for Safe Process-Context Livepatching */
-struct ulp_exec_work {
-	struct callback_head work;
-	struct ulp_kernel_rule_req rule;
-};
-
 #ifndef NT_GNU_BUILD_ID
 #define NT_GNU_BUILD_ID 3
 #endif
@@ -1241,10 +1273,13 @@ static int ulp_read_build_id(struct file *file, u8 *id)
 	return ret;
 }
 
-/* Executes in normal, sleepable, preemptible process context just before return to userspace */
-static void ulp_exec_task_work_fn(struct callback_head *cb)
+/*
+ * Apply an exec rule to the current task. Runs from the rule's uprobe handler:
+ * normal, sleepable, preemptible process context, before the first instruction
+ * of the new image executes.
+ */
+static void ulp_exec_apply_rule(const struct ulp_kernel_rule_req *rule)
 {
-	struct ulp_exec_work *ework = container_of(cb, struct ulp_exec_work, work);
 	struct task_struct *task = current;
 	struct mm_struct *mm = task->mm;
 	struct vm_area_struct *vma;
@@ -1254,25 +1289,18 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	int ret;
 	unsigned long flags;
 
-	if (READ_ONCE(ulp_scope) == ULP_SCOPE_DISABLED) {
-		kfree(ework);
+	if (!mm)
 		return;
-	}
-
-	if (!mm) {
-		kfree(ework);
-		return;
-	}
 
 	/* 1. Identify target executable VMA matching the binary */
 	mmap_read_lock(mm);
 	VMA_ITERATOR(vmi, mm, 0);
 	for_each_vma(vmi, vma) {
 		if ((vma->vm_flags & VM_EXEC) && vma->vm_file && (vma->vm_file == mm->exe_file)) {
-			if (ework->rule.target_offset >= vma->vm_start && ework->rule.target_offset < vma->vm_end)
-				target_vaddr = ework->rule.target_offset; /* Non-PIE absolute */
+			if (rule->target_offset >= vma->vm_start && rule->target_offset < vma->vm_end)
+				target_vaddr = rule->target_offset; /* Non-PIE absolute */
 			else
-				target_vaddr = vma->vm_start + ework->rule.target_offset; /* PIE relative */
+				target_vaddr = vma->vm_start + rule->target_offset; /* PIE relative */
 			exe_file = get_file(vma->vm_file);
 			break;
 		}
@@ -1282,7 +1310,6 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	if (!target_vaddr) {
 		if (exe_file)
 			fput(exe_file);
-		kfree(ework);
 		return;
 	}
 
@@ -1291,19 +1318,18 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	 * package update): writing the trampoline at a stale offset would
 	 * corrupt unrelated code and crash the process on every start.
 	 */
-	if (ework->rule.build_id_len) {
+	if (rule->build_id_len) {
 		u8 id[ULP_BUILD_ID_MAX];
 		int len = ulp_read_build_id(exe_file, id);
 
-		if (len != ework->rule.build_id_len ||
-		    memcmp(id, ework->rule.build_id, ework->rule.build_id_len)) {
+		if (len != rule->build_id_len ||
+		    memcmp(id, rule->build_id, rule->build_id_len)) {
 			pr_warn_ratelimited("[ulp_driver] skipping stale rule '%s' for %s in PID %d: build-id mismatch\n",
-					    ework->rule.patch_name, ework->rule.binary_path, task->pid);
+					    rule->patch_name, rule->binary_path, task->pid);
 			ulp_push_event(ULP_EVT_SECURITY_ALERT, task->pid,
 				       from_kuid(&init_user_ns, task_uid(task)), target_vaddr,
-				       task->comm, ework->rule.patch_name, "Rule skipped: build-id mismatch");
+				       task->comm, rule->patch_name, "Rule skipped: build-id mismatch");
 			fput(exe_file);
-			kfree(ework);
 			return;
 		}
 	}
@@ -1312,7 +1338,6 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	/* Pin the module while patches are active, unless resumption mode is enabled */
 	if (!ulp_pin_module_ref()) {
 		pr_warn("[ulp_driver] Module is unloading. Aborting execve auto-patch for PID %d\n", task->pid);
-		kfree(ework);
 		return;
 	}
 
@@ -1324,19 +1349,17 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	p_entry = kzalloc(sizeof(*p_entry), GFP_KERNEL);
 	if (!p_entry) {
 		ulp_unpin_module_ref();
-		kfree(ework);
 		return;
 	}
 
 	/* 2. Apply livepatch trampoline via sleepable, demand-page-safe direct poke (is_revert = false) */
-	ret = ulp_atomic_direct_poke(task, target_vaddr, ework->rule.patch_bytes,
-								 (ework->rule.tramp_type == ULP_TRAMP_REL5) ? 5 : 16, false);
+	ret = ulp_atomic_direct_poke(task, target_vaddr, rule->patch_bytes,
+				     (rule->tramp_type == ULP_TRAMP_REL5) ? 5 : 16, false);
 	if (ret != 0) {
 		pr_err("[ulp_driver] Kernel execve auto-patch poke failed for PID %d at 0x%llx (ret=%d)\n",
-			   task->pid, target_vaddr, ret);
+		       task->pid, target_vaddr, ret);
 		ulp_unpin_module_ref();
 		kfree(p_entry);
-		kfree(ework);
 		return;
 	}
 
@@ -1344,13 +1367,13 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	p_entry->info.owner_uid = from_kuid(&init_user_ns, current_uid());
 	p_entry->creator_uid = p_entry->info.owner_uid;
 	p_entry->info.target_vaddr = target_vaddr;
-	p_entry->info.patch_vaddr = ework->rule.patch_vaddr;
-	p_entry->info.tramp_len = (ework->rule.tramp_type == ULP_TRAMP_REL5) ? 5 : 16;
+	p_entry->info.patch_vaddr = rule->patch_vaddr;
+	p_entry->info.tramp_len = (rule->tramp_type == ULP_TRAMP_REL5) ? 5 : 16;
 	p_entry->info.enabled = 1;
-	strscpy(p_entry->info.patch_name, ework->rule.patch_name, sizeof(p_entry->info.patch_name));
-	strscpy(p_entry->info.func_name, ework->rule.func_name, sizeof(p_entry->info.func_name));
+	strscpy(p_entry->info.patch_name, rule->patch_name, sizeof(p_entry->info.patch_name));
+	strscpy(p_entry->info.func_name, rule->func_name, sizeof(p_entry->info.func_name));
 	strscpy(p_entry->info.comm, task->comm, sizeof(p_entry->info.comm));
-	memcpy(p_entry->patch_bytes, ework->rule.patch_bytes, 16);
+	memcpy(p_entry->patch_bytes, rule->patch_bytes, 16);
 
 	spin_lock_irqsave(&g_patch_lock, flags);
 	list_add_tail_rcu(&p_entry->list, &g_patch_list);
@@ -1359,120 +1382,155 @@ static void ulp_exec_task_work_fn(struct callback_head *cb)
 	atomic_inc(&g_active_patches);
 
 	pr_info("[ulp_driver] Kernel execve auto-patch: Applied '%s::%s' to PID %d (%s) at 0x%llx\n",
-			ework->rule.patch_name, ework->rule.func_name, task->pid, task->comm, target_vaddr);
+		rule->patch_name, rule->func_name, task->pid, task->comm, target_vaddr);
 	ulp_push_event(ULP_EVT_EXEC_AUTO_PATCH, task->pid, from_kuid(&init_user_ns, current_uid()),
-				   target_vaddr, task->comm, ework->rule.patch_name, "Exec auto-patch applied");
-	kfree(ework);
+		       target_vaddr, task->comm, rule->patch_name, "Exec auto-patch applied");
 }
 
-/* Execve Hook: Runs in kprobe pre_handler (arch_setup_additional_pages) */
-static int ulp_probe_exec(struct kprobe *p, struct pt_regs *regs)
+/* True when the emergency override currently covers this binary. */
+static bool ulp_override_covers(const char *binary_path)
 {
-	char path_buf[256];
-	char *exe_path = NULL;
-	struct ulp_kernel_rule *rule;
+	unsigned long rflags;
+	bool active = false;
+
+	if (!READ_ONCE(g_override_state.active))
+		return false;
+
+	spin_lock_irqsave(&g_rule_lock, rflags);
+	if (g_override_state.active &&
+	    time_before(jiffies, g_override_state.expires_jiffies) &&
+	    strcmp(g_override_state.binary_path, binary_path) == 0) {
+		if (g_override_state.magic[0] == ULP_OVERRIDE_MAGIC_0 &&
+		    g_override_state.magic[1] == ULP_OVERRIDE_MAGIC_1 &&
+		    g_override_state.magic[2] == ULP_OVERRIDE_MAGIC_2 &&
+		    g_override_state.magic[3] == ULP_OVERRIDE_MAGIC_3)
+			active = true;
+		else
+			pr_alert("[ulp_driver] override magic value corrupted; failing closed\n");
+	}
+	spin_unlock_irqrestore(&g_rule_lock, rflags);
+	return active;
+}
+
+/*
+ * Uprobe consumer: hit once per exec of the rule's binary, at its ELF entry
+ * point. ld.so has already mapped the shared libraries; none of the program's
+ * own code (constructors included) has run yet.
+ */
+static int ulp_rule_uprobe_handler(ULP_UPROBE_HANDLER_ARGS)
+{
+	struct ulp_kernel_rule *rule = container_of(uc, struct ulp_kernel_rule, uc);
 	struct task_struct *task = current;
-	struct mm_struct *mm = task->mm;
 	kuid_t uid = current_uid();
 	kgid_t gid = current_gid();
-	struct ulp_exec_work *ework;
-	size_t iters = 0;
-	unsigned long rflags;
-	bool override_active = false;
 
-	if (READ_ONCE(ulp_scope) == ULP_SCOPE_DISABLED)
+	if (READ_ONCE(ulp_scope) == ULP_SCOPE_DISABLED || !READ_ONCE(rule->enabled))
+		return 0;
+	if (!task->mm || !task->mm->exe_file)
 		return 0;
 
-	if (!mm || !mm->exe_file)
+	if (ulp_override_covers(rule->req.binary_path)) {
+		pr_warn("[ulp_driver] Emergency override active for %s (PID %d). Skipping execve livepatch.\n",
+			rule->req.binary_path, task->pid);
 		return 0;
+	}
 
-	/* Fast path: If no rules registered, return immediately */
-	if (atomic_read(&g_active_rules) == 0 && !READ_ONCE(g_override_state.active))
-		return 0;
+	if (!rule->req.global_scope) {
+		if (rule->req.match_uid != (u32)-1 && rule->req.match_uid != __kuid_val(uid))
+			return 0;
+		if (rule->req.match_gid != (u32)-1 && rule->req.match_gid != __kgid_val(gid))
+			return 0;
+	}
 
-	exe_path = d_path(&mm->exe_file->f_path, path_buf, sizeof(path_buf));
-	if (IS_ERR(exe_path))
-		return 0;
+	if (rule->req.parent_pid != 0) {
+		pid_t ppid = 0, rppid = 0;
 
-	/* Check the emergency override state under lock */
-	if (READ_ONCE(g_override_state.active)) {
-		spin_lock_irqsave(&g_rule_lock, rflags);
-		if (g_override_state.active &&
-			time_before(jiffies, g_override_state.expires_jiffies) &&
-			strcmp(g_override_state.binary_path, exe_path) == 0) {
-			if (g_override_state.magic[0] == ULP_OVERRIDE_MAGIC_0 &&
-				g_override_state.magic[1] == ULP_OVERRIDE_MAGIC_1 &&
-				g_override_state.magic[2] == ULP_OVERRIDE_MAGIC_2 &&
-				g_override_state.magic[3] == ULP_OVERRIDE_MAGIC_3) {
-				override_active = true;
-			} else {
-				pr_alert("[ulp_driver] override magic value corrupted; failing closed\n");
-			}
-		}
-		spin_unlock_irqrestore(&g_rule_lock, rflags);
+		rcu_read_lock();
+		if (task->real_parent)
+			rppid = task->real_parent->pid;
+		if (task->parent)
+			ppid = task->parent->pid;
+		rcu_read_unlock();
 
-		if (override_active) {
-			pr_warn("[ulp_driver] Emergency override active for %s (PID %d). Skipping execve livepatch.\n",
-					exe_path, task->pid);
+		if (rppid != rule->req.parent_pid && ppid != rule->req.parent_pid)
+			return 0;
+	}
+
+	ulp_exec_apply_rule(&rule->req);
+	return 0;
+}
+
+/*
+ * File offset of the ELF64 entry point: e_entry translated through the PT_LOAD
+ * segment that contains it. Returns 0 on success or a negative errno.
+ */
+static int ulp_elf_entry_offset(struct file *file, loff_t *offset)
+{
+	Elf64_Ehdr eh;
+	Elf64_Phdr ph;
+	loff_t pos = 0;
+	int i;
+
+	if (kernel_read(file, &eh, sizeof(eh), &pos) != sizeof(eh))
+		return -EIO;
+	if (memcmp(eh.e_ident, ELFMAG, SELFMAG) || eh.e_ident[EI_CLASS] != ELFCLASS64 ||
+	    eh.e_machine != EM_X86_64 || eh.e_phentsize != sizeof(ph) || eh.e_phnum > 128 ||
+	    (eh.e_type != ET_EXEC && eh.e_type != ET_DYN) || !eh.e_entry)
+		return -ENOEXEC;
+
+	for (i = 0; i < eh.e_phnum; i++) {
+		pos = eh.e_phoff + (u64)i * sizeof(ph);
+		if (kernel_read(file, &ph, sizeof(ph), &pos) != sizeof(ph))
+			return -EIO;
+		if (ph.p_type != PT_LOAD || !(ph.p_flags & PF_X))
+			continue;
+		if (eh.e_entry >= ph.p_vaddr && eh.e_entry < ph.p_vaddr + ph.p_filesz) {
+			*offset = eh.e_entry - ph.p_vaddr + ph.p_offset;
 			return 0;
 		}
 	}
+	return -ENOEXEC;
+}
 
-	rcu_read_lock();
-	list_for_each_entry_rcu(rule, &g_rule_list, list) {
-		if (++iters > ULP_MAX_LOOP_ITERS)
-			break;
-		if (!rule->enabled)
-			continue;
+/* Arm a rule: resolve its binary and register the entry-point uprobe. Sleeps. */
+static int ulp_rule_arm(struct ulp_kernel_rule *rule)
+{
+	struct file *file;
+	struct uprobe *up;
+	int ret;
 
-		if (strcmp(rule->req.binary_path, exe_path) == 0) {
-			/* Check UID/GID matching */
-			if (!rule->req.global_scope) {
-				if (rule->req.match_uid != (u32)-1 && rule->req.match_uid != __kuid_val(uid))
-					continue;
-				if (rule->req.match_gid != (u32)-1 && rule->req.match_gid != __kgid_val(gid))
-					continue;
-			}
-
-			/* Check Parent PID hierarchy under RCU protection */
-			if (rule->req.parent_pid != 0) {
-				pid_t ppid = 0, rppid = 0;
-
-				rcu_read_lock();
-				if (task->real_parent)
-					rppid = task->real_parent->pid;
-				if (task->parent)
-					ppid = task->parent->pid;
-				rcu_read_unlock();
-
-				if (rppid != rule->req.parent_pid && ppid != rule->req.parent_pid)
-					continue;
-			}
-
-			/* Defer memory modification to process context before return to userspace */
-			ework = kzalloc(sizeof(*ework), GFP_ATOMIC);
-			if (ework) {
-				memcpy(&ework->rule, &rule->req, sizeof(rule->req));
-				init_task_work(&ework->work, ulp_exec_task_work_fn);
-				if (task_work_add(task, &ework->work, TWA_RESUME)) {
-					/* Finding 5: Log warning and emit security alert on task work queue failure */
-					pr_warn_ratelimited("[ulp_driver] Failed to queue execve livepatch task_work for PID %d (%s)\n",
-										task->pid, task->comm);
-					ulp_push_event(ULP_EVT_SECURITY_ALERT, task->pid, from_kuid(&init_user_ns, current_uid()),
-								   0, task->comm, rule->req.patch_name, "Failed to queue exec task_work");
-					kfree(ework);
-				}
-			} else {
-				pr_warn_ratelimited("[ulp_driver] Failed to allocate execve livepatch work for PID %d (%s)\n",
-									task->pid, task->comm);
-				ulp_push_event(ULP_EVT_SECURITY_ALERT, task->pid, from_kuid(&init_user_ns, current_uid()),
-							   0, task->comm, rule->req.patch_name, "Failed to allocate exec task_work");
-			}
-			break;
-		}
+	file = filp_open(rule->req.binary_path, O_RDONLY | O_LARGEFILE, 0);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+	if (!S_ISREG(file_inode(file)->i_mode)) {
+		ret = -EINVAL;
+		goto out;
 	}
-	rcu_read_unlock();
-	return 0;
+
+	ret = ulp_elf_entry_offset(file, &rule->entry_offset);
+	if (ret)
+		goto out;
+
+	rule->uc.handler = ulp_rule_uprobe_handler;
+	up = uprobe_register(file_inode(file), rule->entry_offset, 0, &rule->uc);
+	if (IS_ERR(up)) {
+		ret = PTR_ERR(up);
+		goto out;
+	}
+	rule->uprobe = up;
+	ret = 0;
+out:
+	filp_close(file, NULL);
+	return ret;
+}
+
+/* Remove the rule's uprobe. Caller must follow with uprobe_unregister_sync(). */
+static void ulp_rule_disarm(struct ulp_kernel_rule *rule)
+{
+	if (!rule->uprobe)
+		return;
+	uprobe_unregister_nosync(rule->uprobe, &rule->uc);
+	rule->uprobe = NULL;
 }
 
 static long ulp_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
@@ -1719,7 +1777,7 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 		pr_warn("[ulp_driver] Driver ARMED for maintenance (TTL: %u seconds, Nonce: 0x%x)\n", ttl, g_arm_nonce);
 		ulp_push_event(ULP_EVT_ARMED, current->pid, from_kuid(&init_user_ns, current_uid()), 0,
 					   current->comm, "arm", "Driver armed for maintenance");
-		return sizeof(cmd);
+		return count;
 	}
 	case ULP_CMD_DISARM: {
 		spin_lock_irqsave(&g_arm_lock, flags);
@@ -1733,7 +1791,7 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 		pr_info("[ulp_driver] Driver DISARMED by operator. Locked into fail-closed enforce mode.\n");
 		ulp_push_event(ULP_EVT_DISARMED, current->pid, from_kuid(&init_user_ns, current_uid()), 0,
 					   current->comm, "disarm", "Driver disarmed by operator");
-		return sizeof(cmd);
+		return count;
 	}
 	case ULP_CMD_APPLY_PATCH: {
 		struct ulp_patch_req preq;
@@ -1766,7 +1824,7 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 		if (ret == 0) {
 			ulp_push_event(ULP_EVT_MANUAL_APPLY, (u32)cmd.target_pid, from_kuid(&init_user_ns, current_uid()),
 						   cmd.target_vaddr, current->comm, cmd.patch_name, "Livepatch applied via VFS write");
-			return sizeof(cmd);
+			return count;
 		}
 		return ret;
 	}
@@ -1781,7 +1839,7 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 		if (ret == 0) {
 			ulp_push_event(ULP_EVT_MANUAL_REVERT, (u32)cmd.target_pid, from_kuid(&init_user_ns, current_uid()),
 						   cmd.target_vaddr, current->comm, "revert", "Livepatch reverted via VFS write");
-			return sizeof(cmd);
+			return count;
 		}
 		return ret;
 	}
@@ -1811,10 +1869,12 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 		rreq.global_scope = (u8)cmd.global_scope;
 		rreq.tramp_type = cmd.tramp_len == 5 ? ULP_TRAMP_REL5 : ULP_TRAMP_ABS16;
 		memcpy(rreq.patch_bytes, cmd.patch_bytes, 16);
+		rreq.build_id_len = cmd.build_id_len;
+		memcpy(rreq.build_id, cmd.build_id, sizeof(rreq.build_id));
 
 		ret = ulp_add_rule(&rreq);
 		if (ret == 0)
-			return sizeof(cmd);
+			return count;
 		return ret;
 	}
 	case ULP_CMD_DEL_RULE: {
@@ -1826,7 +1886,7 @@ static ssize_t ulp_fops_write(struct file *file, const char __user *buf, size_t 
 
 		ret = ulp_del_rule(&rreq);
 		if (ret == 0)
-			return sizeof(cmd);
+			return count;
 		return ret;
 	}
 	default:
@@ -2088,6 +2148,7 @@ static int ulp_restore_state(void)
 		struct ulp_state_rule_record rrec;
 		struct ulp_kernel_rule *new_rule;
 		unsigned long flags;
+		int ret;
 
 		nread = kernel_read(file, &rrec, sizeof(rrec), &pos);
 		if (nread != sizeof(rrec)) {
@@ -2102,6 +2163,13 @@ static int ulp_restore_state(void)
 		memcpy(&new_rule->req, &rrec.req, sizeof(new_rule->req));
 		new_rule->creator_uid = rrec.creator_uid;
 		new_rule->enabled = rrec.enabled;
+
+		ret = ulp_rule_arm(new_rule);
+		if (ret) {
+			/* Keep it listed so it is saved again, but it cannot fire. */
+			pr_warn("[ulp_driver] resumed rule for '%s' could not be armed: %d\n",
+				new_rule->req.binary_path, ret);
+		}
 
 		spin_lock_irqsave(&g_rule_lock, flags);
 		list_add_tail_rcu(&new_rule->list, &g_rule_list);
@@ -2163,15 +2231,6 @@ static int __init ulp_init(void)
 	else
 		g_kp_fork_registered = true;
 
-	/* Register Execve Auto-Patching Kprobe */
-	kp_exec.symbol_name = "arch_setup_additional_pages";
-	kp_exec.pre_handler = ulp_probe_exec;
-	ret = register_kprobe(&kp_exec);
-	if (ret)
-		pr_warn("[ulp_driver] Warning: Failed to register exec kprobe: %d\n", ret);
-	else
-		g_kp_exec_registered = true;
-
 	ulp_sysctl_header = register_sysctl("kernel", ulp_sysctl_table);
 	if (!ulp_sysctl_header)
 		pr_warn("[ulp_driver] Warning: Failed to register /proc/sys/kernel/ulp_scope\n");
@@ -2191,11 +2250,10 @@ static void __exit ulp_exit(void)
 	struct ulp_patch_entry *entry, *tmp;
 	struct ulp_kernel_rule *rule, *rtmp;
 	unsigned long rflags, pflags;
+	LIST_HEAD(dead_rules);
 
 	del_timer_sync(&g_arm_timer);
 
-	if (g_kp_exec_registered)
-		unregister_kprobe(&kp_exec);
 	if (g_kp_fork_registered)
 		unregister_kprobe(&kp_fork);
 
@@ -2213,9 +2271,17 @@ static void __exit ulp_exit(void)
 	spin_lock_irqsave(&g_rule_lock, rflags);
 	list_for_each_entry_safe(rule, rtmp, &g_rule_list, list) {
 		list_del_rcu(&rule->list);
-		kfree_rcu(rule, rcu);
+		list_add_tail(&rule->list, &dead_rules);
 	}
 	spin_unlock_irqrestore(&g_rule_lock, rflags);
+
+	list_for_each_entry(rule, &dead_rules, list)
+		ulp_rule_disarm(rule);
+	uprobe_unregister_sync();
+	list_for_each_entry_safe(rule, rtmp, &dead_rules, list) {
+		list_del(&rule->list);
+		kfree_rcu(rule, rcu);
+	}
 
 	spin_lock_irqsave(&g_patch_lock, pflags);
 	list_for_each_entry_safe(entry, tmp, &g_patch_list, list) {

@@ -327,13 +327,14 @@ ulp-driver solves this permanently by living inside the kernel.
                 +------------------------> | Lockless RCU copy of  |
                 |                          | active patch registry |
                 | execve()                 |                       |
-                | (loads new binary)       | kprobe:arch_setup_add |
-                +------------------------> | task_work_add(TWA)    |
+                | (loads new binary,       | uprobe on the ELF     |
+                |  ld.so maps libraries)   | entry point (_start)  |
+                +------------------------> | of the rule's binary  |
                 |                          +-----------+-----------+
                 |                                      |
                 | <------------------------------------+
                 | (Pokes trampoline in process context
-                |  BEFORE main() executes first opcode!)
+                |  BEFORE the program's first opcode!)
                 v
     +-----------------------+
     | New Process Starts    |
@@ -342,20 +343,20 @@ ulp-driver solves this permanently by living inside the kernel.
 ```
 
 == Why Early-Boot Livepatching Used to Deadlock
-During our early development, we noticed that if the kernel driver tried to patch a process directly inside the `arch_setup_additional_pages` kprobe, the system deadlocked during early boot when `systemd` was spawning hundreds of processes concurrently.
+During our early development, we noticed that if the kernel driver tried to patch a process directly inside an `execve()` kprobe (on `arch_setup_additional_pages`), the system deadlocked during early boot when `systemd` was spawning hundreds of processes concurrently.
 
-*Why?* The `arch_setup_additional_pages` kprobe runs deep inside `load_elf_binary()` while holding the target process's `mmap_lock` (a memory management read-write semaphore). If the driver tried to call memory allocation or page lookup functions that also required locks, it caused an *AB-BA lock inversion deadlock*.
+*Why?* That kprobe runs deep inside `load_elf_binary()` while holding the target process's `mmap_lock` (a memory management read-write semaphore), in atomic context. If the driver tried to call memory allocation or page lookup functions that also required locks, it caused an *AB-BA lock inversion deadlock*.
 
-== The Solution: `task_work_add(..., TWA_RESUME)`
-In modern Linux, the kernel provides `task_work_add()`. Instead of modifying memory immediately inside the kprobe, the driver schedules a tiny callback:
-```c
-task_work_add(current, &ework->work, TWA_RESUME);
-```
-The kprobe returns immediately in less than 50 nanoseconds with zero lock contention. 
+The first fix deferred the write with `task_work_add(..., TWA_RESUME)`, which runs a callback just before the task returns to userspace. Mainline Linux does not export `task_work_add()` to modules (Debian carries a patch that does, which is why the driver used to build only on Debian kernels).
 
-Then, right before the new process returns to userspace for the very first time—after all kernel ELF loading locks have been released, but before the CPU executes the first userspace instruction of `main()`—the kernel runs our `ulp_exec_task_work_fn` in clean, sleepable, preemptible process context. 
+== The Solution: a uprobe on the ELF entry point
+Each exec rule is armed with `uprobe_register()`, an exported API, on the entry point (`e_entry`, i.e. `_start`) of the rule's binary. The driver reads the ELF header once when the rule is added, translates `e_entry` to a file offset through its `PT_LOAD` segment, and registers the probe on the file's inode.
 
-The binary wakes up in userspace *already livepatched*.
+Every process that executes that binary then traps once, at its very first instruction. The uprobe handler runs in the new process's own context: sleepable, preemptible, no kernel locks held. It checks the rule's UID/GID/parent constraints and the emergency override, verifies the GNU build-id, and pokes the trampoline into the freshly mapped text.
+
+Because the trap sits on `_start`, the dynamic loader has already mapped all shared libraries, but none of the program's own code has run; in particular its constructors have not run yet (glibc's `ld.so` leaves the main executable's `.init_array` to `__libc_start_main`).
+
+The binary wakes up in userspace *already livepatched*, and the module no longer depends on any distribution-specific symbol export.
 
 = The Plan 9 VFS File Interface & Fail-Closed Arming Gate
 
@@ -493,7 +494,7 @@ Launch `sudo ulp-tui`:
   [*W^X Protection*], [Hardware memory policy enforcing that memory is either Writable or Executable, never both.],
   [*Torn Write*], [A concurrency hazard where one CPU core reads memory while another core is halfway through writing it, causing an illegal instruction crash.],
   [*Thread Quiescence*], [The condition where no thread in the process is currently executing inside the memory bytes about to be modified.],
-  [*`task_work_add`*], [Linux kernel mechanism to defer work to sleepable process context right before returning to userspace, preventing early-boot deadlocks.],
+  [*uprobe*], [Linux kernel breakpoint on a userspace instruction of a file. Its handler runs in the trapping process's own sleepable context; ulp-driver places one on the ELF entry point of each rule's binary.],
   [*Plan 9 VFS*], [An interface design where hardware and kernel subsystems are exposed as standard files supporting `read()`, `write()`, and `poll()`.],
   [*Fail-Closed*], [A security architecture where the default state denies all dangerous operations (`ULP_STATE_LOCKED`), requiring explicit timed arming.]
 )

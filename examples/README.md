@@ -4,7 +4,7 @@ This directory contains small, runnable examples of userspace livepatching (ULP)
 
 Each example is a self-contained walkthrough: loading the kernel driver, building a payload, resolving symbols, patching a running process, unloading and reloading the driver while the process keeps running, and reverting.
 
-The examples need the real driver, so they run only on x86_64 kernels that export `task_work_add` (Debian does; mainline and Fedora kernels do not).
+The examples need the real driver, so they run only on x86_64 Linux 6.12+ with kprobes and uprobes enabled (Debian, Fedora and other mainline-based kernels all qualify).
 
 ---
 
@@ -235,7 +235,7 @@ pub extern "C" fn livepatch_rust_get_rate_limit() -> u32 {
    /usr/bin/task_worker
    # Output: WORKER_STATUS: status=0 (SECURED_BY_IN_KERNEL_RULE)
    ```
-   The driver's kprobe on `execve()` queues a `task_work` callback that writes the patch bytes before the new program starts running. If the rule carries a GNU build-id, it is applied only when the binary's build-id matches; stale rules are skipped.
+   The driver arms a uprobe on the binary's ELF entry point; its handler writes the patch bytes in the new process's own context before the program's first instruction runs. If the rule carries a GNU build-id, it is applied only when the binary's build-id matches; stale rules are skipped.
 
 4. **Delete Rule**:
    ```bash

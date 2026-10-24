@@ -23,7 +23,7 @@ The project was prototyped with AI to test whether the approach is feasible befo
 - **No post-quantum signing yet.** An earlier experimental implementation was removed; a real one (liboqs or OpenSSL 3.5 ML-DSA) is on the TODO list.
 - **`ulp_scope=1`** (same-UID access) checks matching credentials and refuses non-dumpable targets, but cannot apply Yama or LSM ptrace hooks (they are not exported to modules). Use the default root-only scope.
 - The driver is **x86_64 only**. The other-architecture work is limited to emulation tests.
-- **The driver currently builds only on Debian kernels.** It requires a kernel that exports `task_work_add`, which mainline Linux does not; Debian adds the export with a distribution patch. On Fedora and other mainline-based kernels the module fails to link.
+- **Exec rules fire at the ELF entry point, not inside `execve()`.** Rules are armed with a uprobe on the binary's entry point (`uprobe_register` is exported by mainline, unlike `task_work_add`, so the module builds on Fedora and other vanilla kernels). The patch is written before the program's first instruction, after the dynamic loader has mapped the shared libraries. Rules are bound to the binary's inode when added: if the file is replaced, re-add the rule (persisted rules are re-armed by path at driver load).
 - Benchmarks and test results were run on a small number of personal test VMs.
 
 ---
@@ -58,7 +58,7 @@ See [`examples/README.md`](examples/README.md) for a guided walkthrough, [`docs/
 
 ### Requirements
 
-- **x86_64 Linux with a Debian kernel.** The driver needs a kernel that exports `task_work_add` (see [Status & limitations](#status--limitations)). Tested on Debian 13 (6.12).
+- **x86_64 Linux 6.12 or newer** with `CONFIG_KPROBES` and `CONFIG_UPROBES` (standard distribution kernels have both). Tested on Debian 13 (6.12) and Fedora (7.2, 7.3-rc).
 - **Headers for the running kernel**, gcc, make, the OpenSSL development package, and python3:
   ```bash
   apt install linux-headers-$(uname -r) build-essential libssl-dev python3
