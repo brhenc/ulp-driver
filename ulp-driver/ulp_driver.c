@@ -228,6 +228,8 @@ struct ulp_kernel_rule {
 	struct uprobe_consumer uc;
 	struct uprobe *uprobe;	/* NULL when the rule could not be armed */
 	loff_t entry_offset;
+	bool pie;		/* ET_DYN: target_offset needs the load bias */
+	u64 exec_seg_vaddr;	/* page-aligned p_vaddr of the first executable PT_LOAD */
 };
 
 static LIST_HEAD(g_rule_list);
@@ -242,7 +244,7 @@ static void ulp_rule_disarm(struct ulp_kernel_rule *rule);
  * =========================================================================
  */
 #define ULP_STATE_MAGIC 0x554C505354415445ULL /* "ULPSTATE" */
-#define ULP_STATE_VERSION 2 /* v2: rules carry a build-id */
+#define ULP_STATE_VERSION 3 /* v3: PIE rule offsets are ELF vaddrs, not segment-relative */
 #define ULP_DEFAULT_STATE_FILE "/run/ulp/state.bin"
 #define ULP_FALLBACK_STATE_FILE "/run/ulp_state.bin"
 
@@ -1278,8 +1280,9 @@ static int ulp_read_build_id(struct file *file, u8 *id)
  * normal, sleepable, preemptible process context, before the first instruction
  * of the new image executes.
  */
-static void ulp_exec_apply_rule(const struct ulp_kernel_rule_req *rule)
+static void ulp_exec_apply_rule(const struct ulp_kernel_rule *krule)
 {
+	const struct ulp_kernel_rule_req *rule = &krule->req;
 	struct task_struct *task = current;
 	struct mm_struct *mm = task->mm;
 	struct vm_area_struct *vma;
@@ -1292,15 +1295,21 @@ static void ulp_exec_apply_rule(const struct ulp_kernel_rule_req *rule)
 	if (!mm)
 		return;
 
-	/* 1. Identify target executable VMA matching the binary */
+	/*
+	 * 1. Find the executable's first executable mapping. target_offset is
+	 * the symbol's ELF virtual address (what nm prints); for a PIE the
+	 * kernel mapped the segment at vm_start = load_bias + exec_seg_vaddr.
+	 */
 	mmap_read_lock(mm);
 	VMA_ITERATOR(vmi, mm, 0);
 	for_each_vma(vmi, vma) {
 		if ((vma->vm_flags & VM_EXEC) && vma->vm_file && (vma->vm_file == mm->exe_file)) {
-			if (rule->target_offset >= vma->vm_start && rule->target_offset < vma->vm_end)
-				target_vaddr = rule->target_offset; /* Non-PIE absolute */
+			if (krule->pie)
+				target_vaddr = vma->vm_start - krule->exec_seg_vaddr + rule->target_offset;
 			else
-				target_vaddr = vma->vm_start + rule->target_offset; /* PIE relative */
+				target_vaddr = rule->target_offset;
+			if (target_vaddr < vma->vm_start || target_vaddr + 16 > vma->vm_end)
+				target_vaddr = 0;
 			exe_file = get_file(vma->vm_file);
 			break;
 		}
@@ -1308,6 +1317,8 @@ static void ulp_exec_apply_rule(const struct ulp_kernel_rule_req *rule)
 	mmap_read_unlock(mm);
 
 	if (!target_vaddr) {
+		pr_warn_ratelimited("[ulp_driver] rule '%s': offset 0x%llx is outside the executable mapping of %s (PID %d)\n",
+				    rule->patch_name, rule->target_offset, rule->binary_path, task->pid);
 		if (exe_file)
 			fput(exe_file);
 		return;
@@ -1456,19 +1467,22 @@ static int ulp_rule_uprobe_handler(ULP_UPROBE_HANDLER_ARGS)
 			return 0;
 	}
 
-	ulp_exec_apply_rule(&rule->req);
+	ulp_exec_apply_rule(rule);
 	return 0;
 }
 
 /*
- * File offset of the ELF64 entry point: e_entry translated through the PT_LOAD
- * segment that contains it. Returns 0 on success or a negative errno.
+ * Read what a rule needs from the ELF64 header of its binary: the file offset
+ * of the entry point (e_entry translated through the PT_LOAD that contains
+ * it), whether the binary is a PIE, and the page-aligned p_vaddr of the first
+ * executable PT_LOAD. Returns 0 on success or a negative errno.
  */
-static int ulp_elf_entry_offset(struct file *file, loff_t *offset)
+static int ulp_elf_parse(struct file *file, struct ulp_kernel_rule *rule)
 {
 	Elf64_Ehdr eh;
 	Elf64_Phdr ph;
 	loff_t pos = 0;
+	bool have_seg = false, have_entry = false;
 	int i;
 
 	if (kernel_read(file, &eh, sizeof(eh), &pos) != sizeof(eh))
@@ -1478,18 +1492,23 @@ static int ulp_elf_entry_offset(struct file *file, loff_t *offset)
 	    (eh.e_type != ET_EXEC && eh.e_type != ET_DYN) || !eh.e_entry)
 		return -ENOEXEC;
 
+	rule->pie = (eh.e_type == ET_DYN);
 	for (i = 0; i < eh.e_phnum; i++) {
 		pos = eh.e_phoff + (u64)i * sizeof(ph);
 		if (kernel_read(file, &ph, sizeof(ph), &pos) != sizeof(ph))
 			return -EIO;
 		if (ph.p_type != PT_LOAD || !(ph.p_flags & PF_X))
 			continue;
-		if (eh.e_entry >= ph.p_vaddr && eh.e_entry < ph.p_vaddr + ph.p_filesz) {
-			*offset = eh.e_entry - ph.p_vaddr + ph.p_offset;
-			return 0;
+		if (!have_seg) {
+			rule->exec_seg_vaddr = ph.p_vaddr & PAGE_MASK;
+			have_seg = true;
+		}
+		if (!have_entry && eh.e_entry >= ph.p_vaddr && eh.e_entry < ph.p_vaddr + ph.p_filesz) {
+			rule->entry_offset = eh.e_entry - ph.p_vaddr + ph.p_offset;
+			have_entry = true;
 		}
 	}
-	return -ENOEXEC;
+	return (have_seg && have_entry) ? 0 : -ENOEXEC;
 }
 
 /* Arm a rule: resolve its binary and register the entry-point uprobe. Sleeps. */
@@ -1507,7 +1526,7 @@ static int ulp_rule_arm(struct ulp_kernel_rule *rule)
 		goto out;
 	}
 
-	ret = ulp_elf_entry_offset(file, &rule->entry_offset);
+	ret = ulp_elf_parse(file, rule);
 	if (ret)
 		goto out;
 

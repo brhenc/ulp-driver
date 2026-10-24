@@ -29,7 +29,7 @@ static void print_usage(const char *prog)
     fprintf(stderr, "  revert <pid> <target_hex_vaddr>\n");
     fprintf(stderr, "  add-rule <binary>:<symbol> <patch_name> [patch_vaddr_hex]\n");
     fprintf(stderr, "                 persistent exec rule; patch_vaddr 0 (default) installs a 'return 0' stub\n");
-    fprintf(stderr, "  add-rule <bin_path> <patch_name> <func_name> <target_offset_hex> <patch_vaddr_hex> [func_len] [match_uid] [global_scope]\n");
+    fprintf(stderr, "  add-rule <bin_path> <patch_name> <func_name> <target_offset_hex> <patch_vaddr_hex> [func_len] [match_uid] [global_scope]\n                 target_offset is the function's ELF address as printed by nm (PIE or not)\n");
     fprintf(stderr, "  del-rule <bin_path> <target_offset_hex>\n");
     fprintf(stderr, "  list-rules\n");
     fprintf(stderr, "  build-id <binary>   print the GNU build-id that add-rule records for a binary\n");
@@ -194,31 +194,6 @@ static int resolve_spec(pid_t pid, const char *spec, char *sym_out, size_t sym_l
     loc->vaddr = is_pie ? (start - min_vaddr) + value : value;
     loc->size = size;
     return 0;
-}
-
-/* Page-aligned p_vaddr of the first executable PT_LOAD: the driver resolves PIE rule offsets from there. */
-static int elf_exec_seg_base(const char *path, uint64_t *base)
-{
-    Elf64_Ehdr eh;
-    int fd = open(path, O_RDONLY), ret = -1;
-
-    if (fd < 0)
-        return -1;
-    if (pread(fd, &eh, sizeof(eh), 0) == sizeof(eh) && eh.e_phentsize == sizeof(Elf64_Phdr)) {
-        for (int i = 0; i < eh.e_phnum; i++) {
-            Elf64_Phdr ph;
-
-            if (pread(fd, &ph, sizeof(ph), eh.e_phoff + (uint64_t)i * sizeof(ph)) != sizeof(ph))
-                break;
-            if (ph.p_type == PT_LOAD && (ph.p_flags & PF_X)) {
-                *base = ph.p_vaddr & ~(uint64_t)(sysconf(_SC_PAGESIZE) - 1);
-                ret = 0;
-                break;
-            }
-        }
-    }
-    close(fd);
-    return ret;
 }
 
 /*
@@ -404,16 +379,15 @@ int main(int argc, char **argv)
     if (strcmp(action, "add-rule") == 0 && (argc == 4 || argc == 5) && strchr(argv[2], ':')) {
         static char bin[PATH_MAX], sym[ULP_NAME_MAX], off[32];
         const char *colon = strrchr(argv[2], ':');
-        uint64_t value, size, min_vaddr, seg_base;
+        uint64_t value, size, min_vaddr;
         int is_pie;
 
         snprintf(bin, sizeof(bin), "%.*s", (int)(colon - argv[2]), argv[2]);
         snprintf(sym, sizeof(sym), "%s", colon + 1);
-        if (elf_find_func(bin, sym, &value, &size, &is_pie, &min_vaddr, NULL) < 0 ||
-            elf_exec_seg_base(bin, &seg_base) < 0)
+        if (elf_find_func(bin, sym, &value, &size, &is_pie, &min_vaddr, NULL) < 0)
             return 1;
-        /* The driver resolves PIE offsets from the start of the executable segment */
-        snprintf(off, sizeof(off), "0x%llx", (unsigned long long)(is_pie ? value - seg_base : value));
+        /* The rule offset is the symbol's ELF vaddr (as printed by nm); the driver adds the PIE load bias */
+        snprintf(off, sizeof(off), "0x%llx", (unsigned long long)value);
         sym_argv[0] = argv[0]; sym_argv[1] = argv[1]; sym_argv[2] = bin; sym_argv[3] = argv[3];
         sym_argv[4] = sym; sym_argv[5] = off; sym_argv[6] = argc == 5 ? argv[4] : (char *)"0";
         sym_argv[7] = (char *)"16"; sym_argv[8] = NULL;
@@ -595,17 +569,15 @@ int main(int argc, char **argv)
          * written (16 bytes for the stub and absolute jump, 5 for the relative jump).
          */
         {
-            uint64_t value, size, min_vaddr, seg_base, expect, next_func, room;
+            uint64_t value, size, min_vaddr, next_func, room;
             int is_pie;
             /* Same choice as the trampoline construction below: stub or func_len >= 16 -> 16 bytes, else 5 */
             uint32_t need = (rreq.patch_vaddr != 0 && rreq.func_len < 16) ? 5 : 16;
 
-            if (elf_find_func(rreq.binary_path, rreq.func_name, &value, &size, &is_pie, &min_vaddr, &next_func) == 0 &&
-                elf_exec_seg_base(rreq.binary_path, &seg_base) == 0) {
-                expect = is_pie ? value - seg_base : value;
-                if (expect != rreq.target_offset) {
-                    fprintf(stderr, "Refusing: target offset 0x%llx is not the start of '%s' (expected 0x%llx)\n",
-                            (unsigned long long)rreq.target_offset, rreq.func_name, (unsigned long long)expect);
+            if (elf_find_func(rreq.binary_path, rreq.func_name, &value, &size, &is_pie, &min_vaddr, &next_func) == 0) {
+                if (value != rreq.target_offset) {
+                    fprintf(stderr, "Refusing: target offset 0x%llx is not the start of '%s' (nm says 0x%llx)\n",
+                            (unsigned long long)rreq.target_offset, rreq.func_name, (unsigned long long)value);
                     close(fd);
                     return 1;
                 }

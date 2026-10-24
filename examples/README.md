@@ -222,6 +222,8 @@ pub extern "C" fn livepatch_rust_get_rate_limit() -> u32 {
    ```bash
    ulp_ctl add-rule /usr/bin/task_worker auto_sec_fix check_security_status 0x401170 0 16 0 1
    ```
+   The offset is the function's address as printed by `nm` for the binary, whether or not it is PIE; the driver adds the load bias at exec time. `ulp_ctl add-rule <binary>:<symbol> <patch_name>` resolves it for you.
+
    *(Passing `patch_vaddr=0` instructs the driver to write a return-zero stub: `endbr64; xor %eax, %eax; ret`)*
 
 2. **Inspect Kernel Rules**:

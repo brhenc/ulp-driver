@@ -96,7 +96,7 @@ struct ulp_kernel_rule_req {
 	char  binary_path[128];        /* e.g. /usr/local/sbin/haproxy */
 	char  patch_name[ULP_NAME_MAX];
 	char  func_name[ULP_NAME_MAX];
-	__u64 target_offset;           /* Target symbol offset in binary */
+	__u64 target_offset;           /* Target symbol's ELF vaddr (nm value); PIE load bias is added by the driver */
 	__u64 patch_vaddr;             /* Absolute virtual address or patch payload */
 	__u32 match_uid;               /* Specific UID or (uint32_t)-1 for any */
 	__u32 match_gid;               /* Specific GID or (uint32_t)-1 for any */
